@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Integration Delivery Tracker — Management briefing</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ink: #14202b;
+      --muted: #5c6d7c;
+      --line: #d9e1e6;
+      --paper: #f3f6f4;
+      --card: #ffffff;
+      --accent: #0e7c6b;
+      --accent-soft: #e5f4f0;
+      --warn: #8a5a22;
+      --warn-soft: #f8efe3;
+      --risk: #8d3a3a;
+      --risk-soft: #f8eaea;
+      --good: #1d6b45;
+      --good-soft: #e6f4ec;
+      --shadow: 0 18px 50px rgba(20, 32, 43, 0.06);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: #e7eeea;
+      color: var(--ink);
+      font-family: "DM Sans", "Segoe UI", sans-serif;
+    }
+
+    .deck {
+      height: 100%;
+      display: grid;
+      place-items: center;
+      padding: 1.25rem;
+    }
+
+    .slide {
+      display: none;
+      width: min(1180px, 100%);
+      height: min(720px, calc(100vh - 2.5rem));
+      background:
+        radial-gradient(900px 280px at 100% -10%, rgba(14, 124, 107, 0.08), transparent 60%),
+        var(--paper);
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+      padding: 2.2rem 2.6rem 1.6rem;
+      grid-template-rows: auto 1fr auto;
+      gap: 1.1rem;
+    }
+
+    .slide.active { display: grid; }
+
+    .top {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 1rem;
+      color: var(--muted);
+      font-size: 0.78rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .top strong { color: var(--accent); font-weight: 700; }
+
+    h1 {
+      margin: 0.35rem 0 0;
+      font-size: clamp(2.1rem, 4vw, 3.35rem);
+      line-height: 1.02;
+      letter-spacing: -0.035em;
+      font-weight: 700;
+      max-width: 16ch;
+    }
+
+    .lead {
+      margin: 0.85rem 0 0;
+      max-width: 38rem;
+      color: var(--muted);
+      font-size: 1.12rem;
+      line-height: 1.45;
+    }
+
+    .body {
+      display: grid;
+      align-content: end;
+      gap: 0.9rem;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.8rem;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 1rem 1.05rem 1.05rem;
+      min-height: 9.2rem;
+    }
+
+    .card .kicker {
+      margin: 0;
+      color: var(--accent);
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .card h2 {
+      margin: 0.4rem 0 0.35rem;
+      font-size: 1.22rem;
+      letter-spacing: -0.02em;
+    }
+
+    .card p, .note, .split p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.4;
+      font-size: 0.95rem;
+    }
+
+    .flow {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      align-items: center;
+      color: var(--ink);
+      font-weight: 600;
+      font-size: 0.92rem;
+    }
+
+    .flow span {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 0.35rem 0.7rem;
+    }
+
+    .flow i {
+      color: var(--accent);
+      font-style: normal;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: 1.05fr 0.95fr;
+      gap: 1.1rem;
+      align-items: stretch;
+      min-height: 0;
+    }
+
+    .split h1 {
+      font-size: clamp(1.7rem, 2.5vw, 2.35rem);
+      max-width: 14ch;
+    }
+
+    .split .lead { font-size: 1rem; }
+    .split .bands { grid-template-columns: 1fr; margin-top: 0.9rem; }
+
+    .shot {
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      background: #101820;
+      border: 1px solid #243140;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 16px 36px rgba(16, 24, 32, 0.16);
+    }
+
+    .shot img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+      flex: 1;
+      object-fit: cover;
+      object-position: top center;
+    }
+
+    .shot figcaption {
+      flex: none;
+      padding: 0.45rem 0.75rem 0.55rem;
+      background: #101820;
+      color: #9aafc0;
+      font-size: 0.75rem;
+      letter-spacing: 0.04em;
+    }
+
+    .points {
+      display: grid;
+      gap: 0.65rem;
+      margin-top: 1rem;
+    }
+
+    .point {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 0.7rem;
+      align-items: start;
+    }
+
+    .num {
+      width: 1.6rem;
+      height: 1.6rem;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      display: grid;
+      place-items: center;
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+
+    .point strong { display: block; font-size: 1rem; }
+    .point span { color: var(--muted); font-size: 0.92rem; line-height: 1.35; }
+
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 1rem 1.05rem 1.1rem;
+    }
+
+    .panel h3 {
+      margin: 0 0 0.8rem;
+      font-size: 0.78rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .bar-label, .bar-scale {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+
+    .bar-label { margin-bottom: 0.35rem; color: var(--ink); font-weight: 600; font-size: 0.86rem; }
+
+    .bar {
+      display: flex;
+      height: 0.85rem;
+      border-radius: 999px;
+      overflow: hidden;
+      background: #e6ece9;
+      margin-bottom: 0.35rem;
+    }
+
+    .bar i { display: block; height: 100%; }
+    .a { background: #0e7c6b; }
+    .b { background: #3aa892; }
+    .c { background: #8fd0c4; }
+    .d { background: #c5e4dc; }
+    .open { background: #d5ddd9; }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem 0.8rem;
+      margin-top: 0.7rem;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
+    .legend b {
+      display: inline-block;
+      width: 0.55rem;
+      height: 0.55rem;
+      border-radius: 99px;
+      margin-right: 0.3rem;
+    }
+
+    .bands {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.7rem;
+    }
+
+    .band {
+      border-radius: 14px;
+      padding: 0.85rem 0.9rem;
+      border: 1px solid transparent;
+    }
+
+    .band strong { display: block; font-size: 1.05rem; margin-bottom: 0.2rem; }
+    .band span { font-size: 0.88rem; line-height: 1.35; }
+    .good { background: var(--good-soft); color: var(--good); }
+    .watch { background: var(--warn-soft); color: var(--warn); }
+    .risk { background: var(--risk-soft); color: var(--risk); }
+
+    .groups {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.7rem;
+    }
+
+    .group {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 0.85rem 0.9rem;
+    }
+
+    .group strong { display: block; margin-bottom: 0.25rem; }
+    .group span { color: var(--muted); font-size: 0.88rem; line-height: 1.35; }
+
+    .formula {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr auto 1.15fr;
+      gap: 0.55rem;
+      align-items: stretch;
+    }
+
+    .formula .op {
+      display: grid;
+      place-items: center;
+      color: var(--accent);
+      font-size: 1.4rem;
+      font-weight: 600;
+    }
+
+    .formula article {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 0.9rem 1rem;
+    }
+
+    .formula h2 { margin: 0 0 0.3rem; font-size: 1.05rem; letter-spacing: -0.02em; }
+    .formula p { margin: 0; color: var(--muted); font-size: 0.9rem; line-height: 1.35; }
+
+    .foot {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+
+    .dots { display: flex; gap: 0.4rem; }
+    .dots button {
+      width: 0.55rem;
+      height: 0.55rem;
+      border-radius: 99px;
+      border: 0;
+      padding: 0;
+      background: #c5d0d4;
+      cursor: pointer;
+    }
+    .dots button[aria-current="true"] { background: var(--accent); width: 1.35rem; }
+
+    @media (max-width: 900px) {
+      .slide { height: auto; min-height: calc(100vh - 2.5rem); padding: 1.4rem; }
+      .cards, .bands, .groups, .split, .formula { grid-template-columns: 1fr; }
+      .formula .op { display: none; }
+      h1 { max-width: none; }
+    }
+
+    @media print {
+      body { background: white; }
+      .deck { display: block; padding: 0; }
+      .slide {
+        display: grid;
+        height: auto;
+        min-height: 100vh;
+        box-shadow: none;
+        border-radius: 0;
+        page-break-after: always;
+      }
+      .dots { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="deck" aria-live="polite">
+    <section class="slide active" data-title="Introduction" aria-label="Introduction">
+      <header class="top">
+        <div>Data Ops &amp; Integrations · <strong>Introduction</strong></div>
+        <div>01 / 04</div>
+      </header>
+      <div>
+        <h1>The quarter, in one place</h1>
+        <p class="lead">Rocketlane holds the projects. The Integration Delivery Tracker turns that portfolio into the three questions we answer before we commit the quarter.</p>
+      </div>
+      <div class="body">
+        <div class="cards">
+          <article class="card">
+            <p class="kicker">Estimator</p>
+            <h2>Can we staff the work?</h2>
+            <p>Hours and story points by person, placed in the quarter where the work happens.</p>
+          </article>
+          <article class="card">
+            <p class="kicker">Compliance</p>
+            <h2>Are we delivering it properly?</h2>
+            <p>The controls due at this phase, the evidence, and the next action on each project.</p>
+          </article>
+          <article class="card">
+            <p class="kicker">OKRs</p>
+            <h2>Are we on the outcomes?</h2>
+            <p>Each person’s plan becomes their weight. Progress is scored only for this quarter.</p>
+          </article>
+        </div>
+        <div class="flow" aria-label="How the views connect">
+          <span>Rocketlane projects</span><i>→</i>
+          <span>Estimator</span><i>→</i>
+          <span>Compliance</span><i>→</i>
+          <span>OKRs</span>
+        </div>
+      </div>
+      <footer class="foot">
+        <span>Same projects. Same quarter. Three reads for the room.</span>
+        <nav class="dots" aria-label="Slides"></nav>
+      </footer>
+    </section>
+
+    <section class="slide" data-title="Estimator" aria-label="Estimator">
+      <header class="top">
+        <div>Data Ops &amp; Integrations · <strong>Estimator</strong></div>
+        <div>02 / 04</div>
+      </header>
+      <div class="split">
+        <div>
+          <h1>Staff the work we already committed</h1>
+          <div class="points">
+            <div class="point">
+              <div class="num">1</div>
+              <div>
+                <strong>Size the project once</strong>
+                <span>Story points describe the integration. Hours describe the effort in each phase of delivery.</span>
+              </div>
+            </div>
+            <div class="point">
+              <div class="num">2</div>
+              <div>
+                <strong>Put the hours in the right quarter</strong>
+                <span>Kickoff, build, test, and go-live can fall in different quarters. The plan shows only the slice that belongs now.</span>
+              </div>
+            </div>
+            <div class="point">
+              <div class="num">3</div>
+              <div>
+                <strong>Read the load by person</strong>
+                <span>Planning capacity is six hours on each weekday, before holidays and leave. A new project resizes that person’s quarter only.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <figure class="shot">
+          <img src="briefing/estimator.png" alt="Estimator for Q4 2026. 18 projects are active, quarter hours are 197.2, and 12.5 percent of capacity is used. Hours are shown for each person." />
+          <figcaption>Live estimator · Q4 2026</figcaption>
+        </figure>
+      </div>
+      <footer class="foot">
+        <span>Hours show the load. Story points show how that person’s outcomes should be weighted.</span>
+        <nav class="dots" aria-label="Slides"></nav>
+      </footer>
+    </section>
+
+    <section class="slide" data-title="Compliance" aria-label="Compliance">
+      <header class="top">
+        <div>Data Ops &amp; Integrations · <strong>Compliance</strong></div>
+        <div>03 / 04</div>
+      </header>
+      <div class="split">
+        <div>
+          <h1>See delivery risk before go-live</h1>
+          <p class="lead">Every in-scope project carries the same controls, from the plan through closure. The score uses only what is due for the phase the project is in.</p>
+          <div class="bands" style="margin-top:1rem">
+            <article class="band good">
+              <strong>Compliant · 90–100</strong>
+              <span>Due controls are complete, with evidence on the project.</span>
+            </article>
+            <article class="band watch">
+              <strong>Watch · 70–89</strong>
+              <span>Delivery is moving, with gaps still open in this phase.</span>
+            </article>
+            <article class="band risk">
+              <strong>At risk · below 70</strong>
+              <span>Or any critical control already overdue. The portfolio leads with these.</span>
+            </article>
+          </div>
+        </div>
+        <figure class="shot">
+          <img src="briefing/compliance.png" alt="Compliance portfolio for the current quarter, with the overall score, compliant, watch, and at-risk counts, and the projects sorted by risk." />
+          <figcaption>Live compliance portfolio</figcaption>
+        </figure>
+      </div>
+      <footer class="foot">
+        <span>Each project shows one next action. Dates, notes, and evidence stay with the record.</span>
+        <nav class="dots" aria-label="Slides"></nav>
+      </footer>
+    </section>
+
+    <section class="slide" data-title="OKRs" aria-label="OKRs">
+      <header class="top">
+        <div>Data Ops &amp; Integrations · <strong>OKRs</strong></div>
+        <div>04 / 04</div>
+      </header>
+      <div class="split">
+        <div>
+          <h1>Score the outcomes against the plan</h1>
+          <p class="lead">A linked project’s weight is its allocated quarter hours divided by one person’s quarter capacity. That total does not have to be 100%. Progress counts only the phases that belong in this quarter.</p>
+          <div class="points">
+            <div class="point">
+              <div class="num">W</div>
+              <div>
+                <strong>Weight comes from the estimate</strong>
+                <span>Each project is its hours divided by the quarter's available hours. Adding one does not rebalance the others. Objectives that are not a delivery project keep the weight we type.</span>
+              </div>
+            </div>
+            <div class="point">
+              <div class="num">A</div>
+              <div>
+                <strong>Achievement is this quarter only</strong>
+                <span>Rocketlane progress counts for the phases in this quarter. Later work does not move the score.</span>
+              </div>
+            </div>
+            <div class="point">
+              <div class="num">R</div>
+              <div>
+                <strong>Result is the two combined</strong>
+                <span>Progress toward the goal, times the weight. A key result with no phases this quarter stays unscored.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <figure class="shot">
+          <img src="briefing/okr.png" alt="OKR sheet for Onur in Q4 2026. Weighted score is 63.6 percent, total weight is 100 percent, and each project shows its story-point weight and result." />
+          <figcaption>Live OKRs · one person, Q4 2026</figcaption>
+        </figure>
+      </div>
+      <footer class="foot">
+        <span>The plan sets the weight. Delivery progress sets the score.</span>
+        <nav class="dots" aria-label="Slides"></nav>
+      </footer>
+    </section>
+  </main>
+  <script>
+    (function () {
+      const slides = Array.from(document.querySelectorAll(".slide"));
+      let index = 0;
+
+      function renderDots() {
+        document.querySelectorAll(".dots").forEach((nav) => {
+          nav.innerHTML = slides
+            .map((_, i) => `<button type="button" data-go="${i}" aria-label="Slide ${i + 1}"${i === index ? ' aria-current="true"' : ""}></button>`)
+            .join("");
+        });
+      }
+
+      function show(next) {
+        index = (next + slides.length) % slides.length;
+        slides.forEach((slide, i) => {
+          const on = i === index;
+          slide.classList.toggle("active", on);
+          slide.hidden = !on;
+        });
+        renderDots();
+        history.replaceState(null, "", "#" + (index + 1));
+      }
+
+      document.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-go]");
+        if (button) show(Number(button.getAttribute("data-go")));
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowRight" || event.key === "PageDown" || event.key === " ") {
+          event.preventDefault();
+          show(index + 1);
+        } else if (event.key === "ArrowLeft" || event.key === "PageUp") {
+          event.preventDefault();
+          show(index - 1);
+        } else if (event.key === "Home") {
+          show(0);
+        } else if (event.key === "End") {
+          show(slides.length - 1);
+        }
+      });
+
+      const start = Number(location.hash.replace("#", ""));
+      show(Number.isFinite(start) && start >= 1 && start <= slides.length ? start - 1 : 0);
+    })();
+  </script>
+</body>
+</html>

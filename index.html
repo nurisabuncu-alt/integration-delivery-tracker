@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Integration Delivery Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=okr-sp-weight" />
+</head>
+<body>
+  <div class="app">
+    <header class="hero">
+      <div class="hero-copy">
+        <p class="brand">Data Ops &amp; Integrations</p>
+        <h1>Integration Delivery Tracker</h1>
+        <p class="lede" id="ledeText">Quick estimate: type, flows, assignee, quarter → hours and Work %.</p>
+      </div>
+      <div class="hero-actions">
+        <div class="app-tabs" role="tablist" aria-label="Application section">
+          <button type="button" id="btnTabEstimator" class="btn tab active" role="tab" aria-selected="true">Estimator</button>
+          <button type="button" id="btnTabCompliance" class="btn tab" role="tab" aria-selected="false">Compliance</button>
+          <button type="button" id="btnTabOkr" class="btn tab" role="tab" aria-selected="false">OKRs</button>
+        </div>
+        <div class="mode-toggle estimator-action" role="group" aria-label="Estimate mode">
+          <button type="button" id="btnModeQuick" class="btn mode active">Quick</button>
+          <button type="button" id="btnModeFull" class="btn mode">Full</button>
+        </div>
+        <label class="period-label estimator-action">
+          Year
+          <input id="yearInput" type="number" min="2024" max="2035" value="2026" />
+        </label>
+        <label class="period-label estimator-action">
+          Quarter
+          <select id="quarterFilter"></select>
+        </label>
+        <label class="period-label estimator-action">
+          Month
+          <select id="monthFilter"></select>
+        </label>
+        <label class="period-label estimator-action">
+          User
+          <select id="userFilter">
+            <option value="__all__">All users</option>
+          </select>
+        </label>
+        <button type="button" id="btnAdd" class="btn primary estimator-action">Add project</button>
+        <button type="button" id="btnImport" class="btn estimator-action">Import RL CSV</button>
+        <input id="importCsvInput" type="file" accept=".csv,text/csv" multiple hidden />
+        <button type="button" id="btnExport" class="btn estimator-action">Export CSV</button>
+        <button type="button" id="btnPrint" class="btn estimator-action">Print report</button>
+        <button type="button" id="btnReset" class="btn ghost estimator-action">Reset samples</button>
+      </div>
+    </header>
+
+    <main id="estimatorView">
+    <section class="summary" id="summary">
+      <div class="stat">
+        <span class="stat-label" id="statProjectsLabel">Active in quarter</span>
+        <span class="stat-value" id="statProjects">0</span>
+      </div>
+      <div class="stat" id="statSPWrap">
+        <span class="stat-label" id="statSPLabel">Quarter SP</span>
+        <span class="stat-value" id="statSP">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label" id="statHoursLabel">Quarter hours</span>
+        <span class="stat-value" id="statHours">0</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Available capacity</span>
+        <span class="stat-value" id="statCapacity">0</span>
+        <span class="stat-note" id="statCapacityNote">6 h per weekday</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Capacity used</span>
+        <span class="stat-value" id="statUtilization">0%</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">People with work</span>
+        <span class="stat-value" id="statActive">0</span>
+      </div>
+    </section>
+
+    <section class="dashboard" id="dashboard">
+      <article class="panel dashboard-card dashboard-wide">
+        <div class="panel-head">
+          <h2>Capacity by person <span id="capacityQuarterLabel" class="badge"></span></h2>
+          <p>Planned project hours against 6 available hours per weekday. Holidays and PTO are not deducted.</p>
+        </div>
+        <div id="capacityChart" class="capacity-chart"></div>
+      </article>
+
+      <article class="panel dashboard-card">
+        <div class="panel-head">
+          <h2>Quarter outlook</h2>
+          <p>Estimated effort across the selected year.</p>
+        </div>
+        <div id="quarterChart" class="quarter-chart"></div>
+      </article>
+
+      <article class="panel dashboard-card">
+        <div class="panel-head">
+          <h2>IMPACT phase mix</h2>
+          <p id="phaseMixHint">Delivery hours in the selected quarter.</p>
+        </div>
+        <div id="phaseChart" class="phase-chart"></div>
+      </article>
+
+      <article class="panel dashboard-card dashboard-wide">
+        <div class="panel-head">
+          <h2>Largest projects</h2>
+          <p>Projects driving the most planned effort in the selected quarter.</p>
+        </div>
+        <div id="projectChart" class="project-chart"></div>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Per-user report <span id="reportQuarterLabel" class="badge"></span></h2>
+        <p>Work % = share of quarter hours (effort), not SP×hours.</p>
+      </div>
+      <div id="userReport" class="user-report"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Portfolio by user</h2>
+        <p id="portfolioHint">Enter type and flows. Hours and % update for the selected quarter.</p>
+      </div>
+      <div id="portfolioSections"></div>
+    </section>
+
+    <div class="split" id="detailSplit">
+      <section class="panel">
+        <div class="panel-head">
+          <h2 id="detailHeading">Selected project</h2>
+          <p id="detailTitle">Select a row for details.</p>
+        </div>
+        <div id="quickFocusForm" class="quick-focus-form"></div>
+        <div id="phaseQuarterForm" class="phase-quarter-form empty-state">No project selected.</div>
+        <div id="phaseDetail" class="phase-grid empty-state" style="margin-top:0.9rem"></div>
+      </section>
+
+      <section class="panel" id="configPanel">
+        <div class="panel-head">
+          <h2>Config rates</h2>
+          <p>Edit to recalibrate. Saved in this browser.</p>
+        </div>
+        <div id="configForm" class="config-grid"></div>
+      </section>
+    </div>
+    </main>
+
+    <main id="complianceView" class="hidden" aria-hidden="true">
+      <section class="summary compliance-summary">
+        <div class="stat">
+          <span class="stat-label">Portfolio compliance</span>
+          <span class="stat-value" id="compliancePortfolioScore">0%</span>
+          <span class="stat-note">Average across scored projects</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Compliant</span>
+          <span class="stat-value metric-good" id="complianceGood">0</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Watch</span>
+          <span class="stat-value metric-warn" id="complianceWatch">0</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">At risk</span>
+          <span class="stat-value metric-danger" id="complianceRisk">0</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Critical overdue</span>
+          <span class="stat-value metric-danger" id="complianceCritical">0</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Excluded</span>
+          <span class="stat-value" id="complianceExcluded">0</span>
+        </div>
+      </section>
+
+      <section class="panel compliance-portfolio">
+        <div class="panel-head compliance-panel-head">
+          <div>
+            <h2>Project compliance portfolio</h2>
+            <p>Phase-aware controls, critical gates, evidence, and the next required action.</p>
+          </div>
+        <div class="compliance-actions">
+          <button type="button" id="btnComplianceAddManual" class="btn primary">Add manual project</button>
+          <button type="button" id="btnComplianceAddRocketlane" class="btn">Add from Rocketlane</button>
+          <button type="button" id="btnComplianceExport" class="btn">Export compliance CSV</button>
+        </div>
+        </div>
+        <div class="compliance-filters">
+          <label class="period-label">Source
+            <select id="complianceSourceFilter"></select>
+          </label>
+          <label class="period-label">Status
+            <select id="complianceStatusFilter"></select>
+          </label>
+          <label class="period-label">Owner
+            <select id="complianceOwnerFilter"></select>
+          </label>
+          <label class="period-label">IMPACT phase
+            <select id="compliancePhaseFilter"></select>
+          </label>
+        </div>
+        <div id="rocketlanePicker" class="rocketlane-picker hidden">
+          <div class="rocketlane-picker-fields">
+            <label>Rocketlane API key
+              <input id="rlApiKey" type="password" autocomplete="off" placeholder="Paste a key from Settings → API" />
+            </label>
+            <label>Project name
+              <input id="rlSearch" type="search" placeholder="Leave blank for in-progress projects" />
+            </label>
+            <button type="button" id="btnRlSearch" class="btn">Search</button>
+          </div>
+          <p id="rlSearchStatus" class="table-sub"></p>
+          <div id="rlSearchResults"></div>
+        </div>
+        <div id="complianceTable" class="compliance-table-wrap"></div>
+      </section>
+
+      <div class="split compliance-detail-split">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Compliance profile</h2>
+            <p id="complianceDetailTitle">Select a project.</p>
+          </div>
+          <div id="complianceProfile" class="compliance-profile empty-state">No project selected.</div>
+        </section>
+        <section class="panel compliance-checklist-panel">
+          <div class="panel-head">
+            <h2>Control checklist</h2>
+            <p>Only controls due by the current phase affect the score.</p>
+          </div>
+          <div id="complianceChecklist" class="compliance-checklist empty-state">No project selected.</div>
+        </section>
+      </div>
+    </main>
+
+    <main id="okrView" class="hidden" aria-hidden="true">
+      <section class="summary okr-summary">
+        <div class="stat">
+          <span class="stat-label">Weighted OKR score</span>
+          <span class="stat-value" id="okrPortfolioScore">0%</span>
+          <span class="stat-note">Capped at each key result goal</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Key results</span>
+          <span class="stat-value" id="okrKeyResults">0</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Total weight</span>
+          <span class="stat-value" id="okrTotalWeight">0%</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">On track</span>
+          <span class="stat-value metric-good" id="okrOnTrack">0</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">At risk</span>
+          <span class="stat-value metric-danger" id="okrAtRisk">0</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Rocketlane linked</span>
+          <span class="stat-value" id="okrLinked">0</span>
+        </div>
+      </section>
+
+      <section class="panel okr-workspace">
+        <div class="panel-head okr-panel-head">
+          <div>
+            <h2>Objectives and key results <span id="okrQuarterLabel" class="badge">Q4 2026</span></h2>
+            <p>Linked projects take their weight from allocated quarter hours divided by one person's quarter capacity (weekdays × 6 h). That total does not have to be 100%. Result is achievement times weight. Manual rows keep the weight you type.</p>
+          </div>
+          <div class="okr-actions">
+            <label class="period-label">Quarter
+              <select id="okrQuarterFilter"></select>
+            </label>
+            <label class="period-label">User
+              <select id="okrUserFilter"></select>
+            </label>
+            <button type="button" id="btnOkrAdd" class="btn primary">Add key result</button>
+            <button type="button" id="btnOkrAddProjects" class="btn">Add quarter projects</button>
+            <button type="button" id="btnOkrExport" class="btn">Export CSV</button>
+          </div>
+        </div>
+
+        <div class="okr-sync">
+          <label>Rocketlane API key
+            <input id="okrRlApiKey" type="password" autocomplete="off" placeholder="Used only for this sync" />
+          </label>
+          <button type="button" id="btnOkrSync" class="btn">Sync linked projects</button>
+          <span id="okrSyncStatus" class="table-sub">Task and phase completion can be edited after sync.</span>
+        </div>
+
+        <div id="okrObjectiveSummary" class="okr-objective-summary"></div>
+        <div id="okrTable" class="okr-table-wrap"></div>
+      </section>
+    </main>
+
+    <footer class="foot estimator-footer">
+      <p><strong>Quick mode:</strong> Type + workflows (Std/Cpx) + Dependency + Weeks. Meetings = (weeks − 2) × 0.5 h weekly calls + 1 h kickoff. Blank weeks keeps the 20% overhead. Premium and Misc load each month from Rocketlane time entries; edit a month to override. The Hours field is the package budget. Other uses one number per month, and the quarter total is the sum of those months.</p>
+      <p><strong>Work %:</strong> Quarter hours ÷ sum of quarter hours (per user / team).</p>
+      <p><strong>Import RL CSV:</strong> Rocketlane time report export (TrackedTime in hours). Seeds projects from actuals; Std workflows are reverse-estimated — review Type, Dependency, and flow counts.</p>
+    </footer>
+  </div>
+  <script src="onur-team-tasks-2026.js"></script>
+  <script src="integration-projects-sep-oct-2026.js"></script>
+  <script src="pipeline-compliance-2026.js"></script>
+  <script src="mc-compliance-2026.js"></script>
+  <script src="allocation-timeline-2026.js"></script>
+  <script src="phase-due-dates-2026.js"></script>
+  <script src="premium-month-hours-2026.js"></script>
+  <script src="month-hours-2026.js"></script>
+  <script src="okr-progress-2026.js?v=rl-refresh-oct26"></script>
+  <script src="app.js?v=okr-manual-projects"></script>
+</body>
+</html>
