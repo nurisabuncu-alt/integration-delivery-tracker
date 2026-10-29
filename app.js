@@ -1,5 +1,6 @@
 (() => {
   const STORAGE_KEY = "integration-sp-estimator-v4";
+  const LOCAL_TRANSFER_ID = "2026-10-29-local";
   const PORTFOLIO_SOURCE = "integration-templates-sep-oct-2026";
   const RATES_VERSION = 6; // v6: phase rates from corrected Onur Jan–Oct workflow medians
   const ASSIGNEES = ["Uygar", "Onur", "Cihan", "John", "Unassigned"];
@@ -2801,8 +2802,12 @@
   function load() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return null;
-      const data = JSON.parse(raw);
+      let data = raw ? JSON.parse(raw) : null;
+      if (window.LOCAL_SNAPSHOT && (!data || data.localTransferId !== LOCAL_TRANSFER_ID)) {
+        data = JSON.parse(JSON.stringify(window.LOCAL_SNAPSHOT));
+        data.localTransferId = LOCAL_TRANSFER_ID;
+      }
+      if (!data) return null;
       if (!data.rates) data.rates = { ...DEFAULT_RATES };
       else data.rates = { ...DEFAULT_RATES, ...data.rates };
       // Migrate to Generic-base rates + Type hour multipliers
@@ -2937,6 +2942,15 @@
   };
   applyOkrOwnerProjects(state);
   applyOkrManualEstimatorProjects(state);
+  if (window.LOCAL_SNAPSHOT && state.localTransferId === LOCAL_TRANSFER_ID) {
+    let storedTransferId = null;
+    try {
+      storedTransferId = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null").localTransferId;
+    } catch (error) {
+      storedTransferId = null;
+    }
+    if (storedTransferId !== LOCAL_TRANSFER_ID) save();
+  }
 
   function isQuick() {
     return state.uiMode !== "full";
@@ -5180,6 +5194,7 @@
       selectedComplianceId: null,
       okr: { quarter: "Q4 2026", rows: sampleOkrRows() },
       okrVersion: 1,
+      localTransferId: LOCAL_TRANSFER_ID,
     };
     applyPipelineCompliance(state);
     applyMcCompliance(state);
