@@ -2799,6 +2799,63 @@
     };
   }
 
+  let publishedRocketlaneSyncChanged = false;
+
+  function addPublishedRocketlaneProjects(data) {
+    const sync = window.ROCKETLANE_SYNC;
+    const incoming = sync && Array.isArray(sync.projects) ? sync.projects : [];
+    if (!incoming.length || !data) return false;
+    if (!Array.isArray(data.projects)) data.projects = [];
+    let changed = false;
+    incoming.forEach((project) => {
+      if (!project || !project.id) return;
+      if (data.projects.some((existing) => existing.id === project.id)) return;
+      const copy = JSON.parse(JSON.stringify(project));
+      copy.hoursByMonth = {};
+      copy.hoursByQuarter = {};
+      data.projects.push(copy);
+      changed = true;
+    });
+    return changed;
+  }
+
+  function applyPublishedRocketlaneOkr(data) {
+    const sync = window.ROCKETLANE_SYNC;
+    const phases = sync && sync.okrPhases;
+    if (!data || !phases) return false;
+    ensureOkrState(data);
+    let changed = false;
+    (data.okr.rows || []).forEach((row) => {
+      const projectId = String(row.rocketlaneProjectId || "");
+      const snap = phases[projectId];
+      if (!projectId || !snap || !snap.phases) return;
+      const project = data.projects.find(
+        (item) => String(item.id) === projectId || String(item.id) === "rl-" + projectId
+      );
+      if (!project || !String(project.id).startsWith("rl-")) return;
+      if (row.syncedAt && snap.syncedAt && String(row.syncedAt) >= String(snap.syncedAt)) return;
+      if (!row.phases) row.phases = blankOkrPhases();
+      if (!row.phaseOverrides) row.phaseOverrides = {};
+      let phaseChanged = false;
+      OKR_PHASE_KEYS.forEach((key) => {
+        if (row.phaseOverrides[key]) return;
+        const next = Math.max(0, Math.min(100, n(snap.phases[key])));
+        if (n(row.phases[key]) !== next) {
+          row.phases[key] = next;
+          phaseChanged = true;
+        }
+      });
+      if (!phaseChanged) return;
+      const overrideCount = OKR_PHASE_KEYS.filter((key) => row.phaseOverrides[key]).length;
+      row.syncSource = `Rocketlane · ${n(snap.taskCount)} tasks${
+        overrideCount ? ` · ${overrideCount} manual override${overrideCount === 1 ? "" : "s"}` : ""
+      }`;
+      if (snap.syncedAt) row.syncedAt = snap.syncedAt;
+      changed = true;
+    });
+    return changed;
+  }
+
   function load() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -2882,6 +2939,7 @@
         mergeOnurTeamTasks(data);
         pruneOnurTeamTasks(data);
       }
+      if (addPublishedRocketlaneProjects(data)) publishedRocketlaneSyncChanged = true;
       data.projects.forEach((p) => {
         p.assignee = normalizeAssignee(p.assignee);
         if (!p.id) p.id = uid();
@@ -2910,6 +2968,7 @@
       applyOkrOwnerProjects(data);
       applyOkrManualEstimatorProjects(data);
       applyOkrRocketlaneRefresh(data);
+      if (applyPublishedRocketlaneOkr(data)) publishedRocketlaneSyncChanged = true;
       applyApparelMagicQuarters(data);
       return data;
     } catch {
@@ -2951,6 +3010,7 @@
     }
     if (storedTransferId !== LOCAL_TRANSFER_ID) save();
   }
+  if (publishedRocketlaneSyncChanged) save();
 
   function isQuick() {
     return state.uiMode !== "full";

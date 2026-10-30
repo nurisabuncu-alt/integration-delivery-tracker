@@ -1,0 +1,36 @@
+name: Rocketlane sync
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rocketlane-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Refresh integration projects and linked OKR phases
+        run: node scripts/rocketlane-sync.mjs
+        env:
+          ROCKETLANE_API_KEY: ${{ secrets.ROCKETLANE_API_KEY }}
+      - name: Publish the refresh
+        run: |
+          git add local-snapshot.js rocketlane-sync.js index.html
+          if git diff --cached --quiet; then
+            echo "No Rocketlane changes."
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "Refresh Rocketlane projects and OKR phase progress."
+          git push
