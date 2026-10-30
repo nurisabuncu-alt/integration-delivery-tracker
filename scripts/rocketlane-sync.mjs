@@ -515,7 +515,9 @@ const fallbackQuarter = snapshot.quarter || "Q4 2026";
 const syncedAt = new Date().toISOString();
 let added = 0;
 let flowsUpdated = 0;
+let okrAdded = 0;
 let phasesUpdated = 0;
+const publishedOkrIds = new Set();
 
 function upsertSyncProject(row) {
   const index = sync.projects.findIndex((item) => item && item.id === row.id);
@@ -528,6 +530,34 @@ function quarterForRow(phaseQuarters) {
   if (values.includes(fallbackQuarter)) return fallbackQuarter;
   values.sort((left, right) => quarterSortKey(left) - quarterSortKey(right));
   return values[values.length - 1] || fallbackQuarter;
+}
+
+function ensurePortfolioOkr(row) {
+  const linkId = row.id.replace(/^rl-/, "");
+  publishedOkrIds.add(linkId);
+  if (snapshot.okr.rows.some((okr) => String(okr.rocketlaneProjectId || "") === linkId)) return;
+  snapshot.okr.rows.push({
+    id: `okr-${row.id}`,
+    quarter: quarterForRow(row.phaseQuarters),
+    objective: row.type === "Other" || row.type === "Misc" ? "Operational Excellence" : "Activated ARR",
+    keyResult: row.name,
+    details: row.notes || "",
+    goal: 100,
+    achievementOverride: null,
+    weight: 0,
+    feedback: "",
+    managerReview: "",
+    projectType: row.type === "Premium API Support" ? "API Support" : row.type === "Other" || row.type === "Misc" ? "Misc" : "Integration",
+    owner: row.assignee,
+    confidence: "Not set",
+    rocketlaneProjectId: linkId,
+    evidence: "",
+    phases: { projectManagement: 0, mapping: 0, design: 0, development: 0, proofOfDelivery: 0 },
+    phaseOverrides: {},
+    syncSource: "Rocketlane project",
+    syncName: true,
+  });
+  okrAdded += 1;
 }
 
 const projects = await rocketlanePages("/api/1.0/projects?pageSize=100&includeAllFields=true");
@@ -549,29 +579,7 @@ for (const project of projects) {
     if (!existing) {
       snapshot.projects.push(row);
       upsertSyncProject(row);
-      if (!snapshot.okr.rows.some((okr) => String(okr.rocketlaneProjectId || "") === row.id.replace(/^rl-/, ""))) {
-        snapshot.okr.rows.push({
-          id: `okr-${row.id}`,
-          quarter: quarterForRow(row.phaseQuarters),
-          objective: row.type === "Other" || row.type === "Misc" ? "Operational Excellence" : "Activated ARR",
-          keyResult: row.name,
-          details: row.notes || "",
-          goal: 100,
-          achievementOverride: null,
-          weight: 0,
-          feedback: "",
-          managerReview: "",
-          projectType: row.type === "Premium API Support" ? "API Support" : row.type === "Other" || row.type === "Misc" ? "Misc" : "Integration",
-          owner: row.assignee,
-          confidence: "Not set",
-          rocketlaneProjectId: row.id.replace(/^rl-/, ""),
-          evidence: "",
-          phases: { projectManagement: 0, mapping: 0, design: 0, development: 0, proofOfDelivery: 0 },
-          phaseOverrides: {},
-          syncSource: "Rocketlane project",
-          syncName: true,
-        });
-      }
+      ensurePortfolioOkr(row);
       added += 1;
       console.log(`Added ${row.id} ${row.assignee} flows=${row.std}`);
       continue;
@@ -585,6 +593,7 @@ for (const project of projects) {
       flowsUpdated += 1;
       console.log(`Flows ${row.id} ${row.assignee} ${row.std}`);
     }
+    ensurePortfolioOkr(row);
   }
   known.add(id);
 }
@@ -626,7 +635,11 @@ for (const projectId of linked) {
   if (!same) console.log(`OKR ${projectId} ${okrPhaseKeys.map((key) => computed.phases[key]).join("/")}`);
 }
 
-if (!added && !flowsUpdated && !phasesUpdated) {
+const previousOkrLinks = new Set((sync.okrRows || []).map((row) => String(row.rocketlaneProjectId || "")));
+sync.okrRows = (snapshot.okr.rows || []).filter((row) => publishedOkrIds.has(String(row.rocketlaneProjectId || "")));
+const okrPublishMissing = [...publishedOkrIds].some((linkId) => !previousOkrLinks.has(linkId));
+
+if (!added && !flowsUpdated && !okrAdded && !phasesUpdated && !okrPublishMissing) {
   const baselineMissing = linked.some((projectId) => !sync.okrPhases[projectId]);
   if (!baselineMissing) {
     console.log("No Rocketlane changes.");
@@ -635,11 +648,11 @@ if (!added && !flowsUpdated && !phasesUpdated) {
 }
 
 sync.syncedAt = syncedAt;
-if (added || flowsUpdated || phasesUpdated) writeAssignment(snapshotPath, "LOCAL_SNAPSHOT", snapshot);
+if (added || flowsUpdated || okrAdded || phasesUpdated) writeAssignment(snapshotPath, "LOCAL_SNAPSHOT", snapshot);
 writeAssignment(syncPath, "ROCKETLANE_SYNC", sync);
 const stamp = syncedAt.replace(/[-:]/g, "").slice(0, 15);
 let html = readFileSync(indexPath, "utf8");
 html = html.replace(/rocketlane-sync\.js\?v=[^"]+/, `rocketlane-sync.js?v=${stamp}`);
-if (added || flowsUpdated || phasesUpdated) html = html.replace(/local-snapshot\.js\?v=[^"]+/, `local-snapshot.js?v=${stamp}`);
+if (added || flowsUpdated || okrAdded || phasesUpdated) html = html.replace(/local-snapshot\.js\?v=[^"]+/, `local-snapshot.js?v=${stamp}`);
 writeFileSync(indexPath, html, "utf8");
-console.log(`Added ${added} portfolio row${added === 1 ? "" : "s"}. Updated ${flowsUpdated} flow count${flowsUpdated === 1 ? "" : "s"} and ${phasesUpdated} OKR row${phasesUpdated === 1 ? "" : "s"}.`);
+console.log(`Added ${added} portfolio row${added === 1 ? "" : "s"}. Updated ${flowsUpdated} flow count${flowsUpdated === 1 ? "" : "s"}, ${okrAdded} new OKR row${okrAdded === 1 ? "" : "s"}, and ${phasesUpdated} OKR phase row${phasesUpdated === 1 ? "" : "s"}.`);

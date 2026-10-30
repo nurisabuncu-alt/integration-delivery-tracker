@@ -2829,6 +2829,22 @@
     return changed;
   }
 
+  function addPublishedRocketlaneOkrRows(data) {
+    const sync = window.ROCKETLANE_SYNC;
+    const incoming = sync && Array.isArray(sync.okrRows) ? sync.okrRows : [];
+    if (!incoming.length || !data) return false;
+    ensureOkrState(data);
+    let changed = false;
+    incoming.forEach((row) => {
+      const linkId = String(row && row.rocketlaneProjectId || "");
+      if (!linkId) return;
+      if (data.okr.rows.some((item) => String(item.rocketlaneProjectId || "") === linkId)) return;
+      data.okr.rows.push(JSON.parse(JSON.stringify(row)));
+      changed = true;
+    });
+    return changed;
+  }
+
   function applyPublishedRocketlaneOkr(data) {
     const sync = window.ROCKETLANE_SYNC;
     const phases = sync && sync.okrPhases;
@@ -2978,6 +2994,7 @@
       applyOkrOwnerProjects(data);
       applyOkrManualEstimatorProjects(data);
       applyOkrRocketlaneRefresh(data);
+      if (addPublishedRocketlaneOkrRows(data)) publishedRocketlaneSyncChanged = true;
       if (applyPublishedRocketlaneOkr(data)) publishedRocketlaneSyncChanged = true;
       applyApparelMagicQuarters(data);
       return data;
