@@ -2809,12 +2809,22 @@
     let changed = false;
     incoming.forEach((project) => {
       if (!project || !project.id) return;
-      if (data.projects.some((existing) => existing.id === project.id)) return;
-      const copy = JSON.parse(JSON.stringify(project));
-      copy.hoursByMonth = {};
-      copy.hoursByQuarter = {};
-      data.projects.push(copy);
-      changed = true;
+      const existing = data.projects.find((item) => item.id === project.id);
+      if (!existing) {
+        const copy = JSON.parse(JSON.stringify(project));
+        copy.hoursByMonth = {};
+        copy.hoursByQuarter = {};
+        data.projects.push(copy);
+        changed = true;
+        return;
+      }
+      if (project.updateFlowCount && existing.flowCountFromTasks !== false && n(existing.std) !== n(project.std)) {
+        existing.std = n(project.std);
+        existing.cpx = 0;
+        existing.ins = 0;
+        existing.flowCountFromTasks = true;
+        changed = true;
+      }
     });
     return changed;
   }
@@ -2827,7 +2837,7 @@
     let changed = false;
     (data.okr.rows || []).forEach((row) => {
       const projectId = String(row.rocketlaneProjectId || "");
-      const snap = phases[projectId];
+      const snap = phases[projectId] || phases[projectId.split("~")[0]];
       if (!projectId || !snap || !snap.phases) return;
       const project = data.projects.find(
         (item) => String(item.id) === projectId || String(item.id) === "rl-" + projectId
@@ -4282,7 +4292,7 @@
             ({ p, c }) =>
               p.status !== "Cancelled" &&
               (c.hasWorkInQuarter ||
-                (p.source === "manual" && phaseAssignedToQuarter(p, state.quarter)))
+                ((p.source === "manual" || p.portfolioShare) && phaseAssignedToQuarter(p, state.quarter)))
           )
           .map(({ p, c }) => renderRow(p, c, teamHoursWeight, t.weight))
           .join("");
@@ -4508,7 +4518,10 @@
     } else if (f === "weeks") p.weeks = String(t.value).trim() === "" ? null : n(t.value);
     else if (["std", "cpx", "ins", "premiumHours", "okr"].includes(f)) {
       p[f] = n(t.value);
-      if ((f === "std" || f === "cpx" || f === "ins") && p.source !== "manual") clearMonthHoursForFlows(p);
+      if (f === "std" || f === "cpx" || f === "ins") {
+        p.flowCountFromTasks = false;
+        if (p.source !== "manual") clearMonthHoursForFlows(p);
+      }
     }
     else if (f === "assignee") p.assignee = normalizeAssignee(t.value);
     else p[f] = t.value;
@@ -4744,7 +4757,7 @@
     }
     const rows = okrRowsForQuarter().filter((row) => {
       const project = okrLinkedProject(row);
-      return project && String(project.id || "").startsWith("rl-");
+      return project && /^\d+$/.test(String(row.rocketlaneProjectId || "").split("~")[0]) && String(project.id || "").startsWith("rl-");
     });
     if (!rows.length) {
       els.okrSyncStatus.textContent = "Link at least one Rocketlane project first.";
@@ -4752,26 +4765,37 @@
       return;
     }
     els.btnOkrSync.disabled = true;
+    const rowsByProject = new Map();
+    rows.forEach((row) => {
+      const projectId = String(row.rocketlaneProjectId || "").split("~")[0];
+      if (!rowsByProject.has(projectId)) rowsByProject.set(projectId, []);
+      rowsByProject.get(projectId).push(row);
+    });
     let synced = 0;
     let failed = 0;
     const failureMessages = [];
-    for (const row of rows) {
-      els.okrSyncStatus.textContent = `Syncing ${synced + failed + 1} of ${rows.length}: ${row.keyResult}`;
+    for (const [projectId, group] of rowsByProject) {
+      els.okrSyncStatus.textContent = `Syncing ${synced + failed + 1} of ${rowsByProject.size}: ${group[0].keyResult}`;
       try {
-        const phases = await fetchRocketlanePhaseRows(apiKey, row.rocketlaneProjectId);
-        const tasks = await fetchRocketlaneTasksForOkr(apiKey, row.rocketlaneProjectId);
+        const phases = await fetchRocketlanePhaseRows(apiKey, projectId);
+        const tasks = await fetchRocketlaneTasksForOkr(apiKey, projectId);
         const syncedPhases = computeRocketlaneOkrPhases(phases, tasks);
-        OKR_PHASE_KEYS.forEach((key) => {
-          if (!row.phaseOverrides[key]) row.phases[key] = syncedPhases[key];
+        const taskCount = tasks.filter((task) => !task.archived).length;
+        group.forEach((row) => {
+          OKR_PHASE_KEYS.forEach((key) => {
+            if (!row.phaseOverrides[key]) row.phases[key] = syncedPhases[key];
+          });
+          const overrideCount = OKR_PHASE_KEYS.filter((key) => row.phaseOverrides[key]).length;
+          row.syncSource = `Rocketlane · ${taskCount} tasks${overrideCount ? ` · ${overrideCount} manual override${overrideCount === 1 ? "" : "s"}` : ""}`;
+          row.syncedAt = new Date().toISOString();
         });
-        const overrideCount = OKR_PHASE_KEYS.filter((key) => row.phaseOverrides[key]).length;
-        row.syncSource = `Rocketlane · ${tasks.filter((task) => !task.archived).length} tasks${overrideCount ? ` · ${overrideCount} manual override${overrideCount === 1 ? "" : "s"}` : ""}`;
-        row.syncedAt = new Date().toISOString();
         synced += 1;
       } catch (error) {
         failed += 1;
         const message = String(error.message || error || "Unknown error");
-        row.syncSource = `Sync failed: ${message}`;
+        group.forEach((row) => {
+          row.syncSource = `Sync failed: ${message}`;
+        });
         if (!failureMessages.includes(message)) failureMessages.push(message);
       }
       await new Promise((resolve) => setTimeout(resolve, 400));
