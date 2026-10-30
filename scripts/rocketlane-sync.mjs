@@ -636,7 +636,18 @@ for (const projectId of linked) {
 }
 
 const previousOkrLinks = new Set((sync.okrRows || []).map((row) => String(row.rocketlaneProjectId || "")));
-sync.okrRows = (snapshot.okr.rows || []).filter((row) => publishedOkrIds.has(String(row.rocketlaneProjectId || "")));
+const okrSeen = new Set();
+sync.okrRows = [];
+(snapshot.okr.rows || []).forEach((row) => {
+  const linkId = String(row.rocketlaneProjectId || "");
+  if (!linkId || okrSeen.has(linkId)) return;
+  if (!publishedOkrIds.has(linkId) && !linkId.includes("~")) return;
+  okrSeen.add(linkId);
+  sync.okrRows.push(row);
+});
+(snapshot.projects || []).forEach((project) => {
+  if (project && project.portfolioShare) upsertSyncProject(project);
+});
 const okrPublishMissing = [...publishedOkrIds].some((linkId) => !previousOkrLinks.has(linkId));
 
 if (!added && !flowsUpdated && !okrAdded && !phasesUpdated && !okrPublishMissing) {
