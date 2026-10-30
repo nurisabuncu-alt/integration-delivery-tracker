@@ -3057,6 +3057,7 @@
     userReport: document.getElementById("userReport"),
     reportQuarterLabel: document.getElementById("reportQuarterLabel"),
     phaseQuarterForm: document.getElementById("phaseQuarterForm"),
+    projectEditor: document.getElementById("projectEditor"),
     quickFocusForm: document.getElementById("quickFocusForm"),
     phaseDetail: document.getElementById("phaseDetail"),
     detailTitle: document.getElementById("detailTitle"),
@@ -3636,11 +3637,12 @@
     if (!active) return null;
     const inSections = els.sections.contains(active);
     const inPhase = els.phaseQuarterForm.contains(active);
+    const inEditor = els.projectEditor.contains(active);
     const inQuick = els.quickFocusForm.contains(active);
-    if (!inSections && !inPhase && !inQuick) return null;
+    if (!inSections && !inPhase && !inEditor && !inQuick) return null;
     const tr = active.closest("tr[data-id]");
     return {
-      scope: inQuick ? "quick" : inPhase ? "phase" : "row",
+      scope: inQuick ? "quick" : inEditor ? "editor" : inPhase ? "phase" : "row",
       id: tr ? tr.getAttribute("data-id") : state.selectedId,
       field:
         active.getAttribute("data-f") ||
@@ -3661,6 +3663,10 @@
         els.phaseQuarterForm.querySelector(`[data-phase-q="${CSS.escape(focus.field)}"]`) ||
         els.phaseQuarterForm.querySelector(`[data-qhours="${CSS.escape(focus.field)}"]`) ||
         els.phaseQuarterForm.querySelector(`[data-mhours="${CSS.escape(focus.field)}"]`);
+    } else if (focus.scope === "editor") {
+      el =
+        els.projectEditor.querySelector(`[data-f="${CSS.escape(focus.field)}"]`) ||
+        els.projectEditor.querySelector(`[data-mhours="${CSS.escape(focus.field)}"]`);
     } else if (focus.scope === "quick") {
       el = els.quickFocusForm.querySelector(`[data-focus="${focus.field}"]`);
     } else if (focus.id) {
@@ -3836,7 +3842,7 @@
       : "Std, Cpx, and Ins calculate flow hours. Month columns add entered hours on top. The quarter total is both.";
     els.detailHeading.textContent = isQuick()
       ? "Selected project — flows and monthly hours"
-      : "Selected project — phases by quarter";
+      : "Selected project";
   }
 
   function okrRowsForQuarter() {
@@ -4349,10 +4355,49 @@
     restoreFocus(focus);
   }
 
+  function renderProjectEditor(p) {
+    if (isQuick()) {
+      els.projectEditor.className = "project-editor hidden-mode";
+      els.projectEditor.innerHTML = "";
+      return;
+    }
+    const direct = isDirectHoursType(p.type);
+    const flows = direct
+      ? `<label>Budget hours<input data-f="premiumHours" type="number" min="0" step="0.1" value="${n(p.premiumHours)}" title="Rocketlane budgeted package hours." /></label>`
+      : `<div class="span-2 flow-row">
+          <label>Std<input data-f="std" type="number" min="0" step="1" value="${n(p.std)}" title="Standard flows" /></label>
+          <label>Cpx<input data-f="cpx" type="number" min="0" step="1" value="${n(p.cpx)}" title="Complex flows" /></label>
+          <label>Ins<input data-f="ins" type="number" min="0" step="1" value="${n(p.ins)}" title="Insane flows" /></label>
+        </div>`;
+    const byMonth = ensureHoursByMonth(p);
+    const months = monthsInQuarter(state.quarter)
+      .map((item) => monthHoursInput(item, byMonth))
+      .join("");
+    const weeks = p.weeks == null || p.weeks === "" ? "" : n(p.weeks);
+    els.projectEditor.className = "project-editor";
+    els.projectEditor.innerHTML = `
+      <label class="span-2">Project<input data-f="name" type="text" value="${escapeAttr(p.name)}" /></label>
+      <label>Assignee<select data-f="assignee">${optionList(ASSIGNEES, normalizeAssignee(p.assignee))}</select></label>
+      <label>Status<select data-f="status">${optionList(PROJECT_STATUSES, p.status)}</select></label>
+      <label>Type<select data-f="type">${optionList(Object.keys(LOOKUPS.typeBase), p.type)}</select></label>
+      <label>Category<select data-f="category">${optionList(Object.keys(LOOKUPS.categoryWeight), p.category)}</select></label>
+      <label>Effort<select data-f="effort">${optionList(Object.keys(LOOKUPS.effort), p.effort)}</select></label>
+      ${flows}
+      <label>Dependency<select data-f="dependency">${optionList(Object.keys(LOOKUPS.dependency), p.dependency)}</select></label>
+      <label>Mapping<select data-f="mapping">${optionList(Object.keys(LOOKUPS.mapping), p.mapping)}</select></label>
+      <label>Connection<select data-f="connection">${optionList(Object.keys(LOOKUPS.connection), p.connection)}</select></label>
+      <label>Weeks<input data-f="weeks" type="number" min="0" step="1" value="${weeks}" title="Blank keeps the 20% meetings overhead." /></label>
+      <label class="check-field span-2"><input data-f="erpCutover" type="checkbox" ${p.erpCutover ? "checked" : ""} /> ERP cutover</label>
+      <div class="span-2 flow-row">${months}</div>
+      <label class="span-2">Notes<textarea data-f="notes">${escapeHtml(p.notes || "")}</textarea></label>`;
+  }
+
   function renderDetail(computed, teamHoursWeight) {
     const row = computed.find((x) => x.p.id === state.selectedId) || computed[0];
     if (!row) {
       els.detailTitle.textContent = "Select a row for details.";
+      els.projectEditor.className = "project-editor hidden-mode";
+      els.projectEditor.innerHTML = "";
       els.quickFocusForm.innerHTML = "";
       els.phaseQuarterForm.className = "phase-quarter-form empty-state";
       els.phaseQuarterForm.textContent = "No project selected.";
@@ -4364,6 +4409,7 @@
     state.selectedId = row.p.id;
     const { p, c } = row;
     ensurePhaseQuarters(p, state.quarter);
+    renderProjectEditor(p);
     const teamPct =
       teamHoursWeight > 0 && p.status !== "Cancelled" ? c.quarterHours / teamHoursWeight : 0;
 
@@ -4516,16 +4562,10 @@
   els.sections.addEventListener("change", onField);
   els.sections.addEventListener("input", onField);
 
-  function onField(e) {
-    const t = e.target;
+  function applyProjectField(p, t) {
     const monthKeyValue = t.getAttribute("data-mhours");
     const f = t.getAttribute("data-f");
-    if (!f && !monthKeyValue) return;
-    const tr = t.closest("tr[data-id]");
-    if (!tr) return;
-    const id = tr.getAttribute("data-id");
-    const p = state.projects.find((x) => x.id === id);
-    if (!p) return;
+    if (!f && !monthKeyValue) return false;
 
     if (monthKeyValue) setMonthHours(p, monthKeyValue, t.value);
     else if (f === "erpCutover") p.erpCutover = t.checked;
@@ -4559,7 +4599,15 @@
     if (p.source === "manual" && !p.complianceOnly && (f === "name" || f === "assignee")) {
       linkManualProjectToOkr(state, p);
     }
+    return true;
+  }
 
+  function onField(e) {
+    const tr = e.target.closest("tr[data-id]");
+    if (!tr) return;
+    const id = tr.getAttribute("data-id");
+    const p = state.projects.find((x) => x.id === id);
+    if (!p || !applyProjectField(p, e.target)) return;
     state.selectedId = id;
     requestAnimationFrame(() => render());
   }
@@ -4579,6 +4627,15 @@
     }
     requestAnimationFrame(() => render());
   }
+
+  function onProjectEditor(e) {
+    const p = state.projects.find((x) => x.id === state.selectedId);
+    if (!p || !applyProjectField(p, e.target)) return;
+    requestAnimationFrame(() => render());
+  }
+
+  els.projectEditor.addEventListener("input", onProjectEditor);
+  els.projectEditor.addEventListener("change", onProjectEditor);
 
   els.phaseQuarterForm.addEventListener("input", onQuarterHourInput);
   els.phaseQuarterForm.addEventListener("change", (e) => {
