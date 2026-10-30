@@ -381,6 +381,11 @@
     return n(p.std) + n(p.cpx) + n(p.ins) > 0;
   }
 
+  /** Task-derived flow counts still use phase hours when that person's count is zero. */
+  function usesCalculatedPhases(p) {
+    return hasFlowEstimate(p) || p.flowCountFromTasks === true;
+  }
+
   const MONTH_NAMES = [
     "January",
     "February",
@@ -507,7 +512,7 @@
    * Kickoff is 1 h. Blank weeks keeps the percent overhead.
    */
   function meetingPlan(p, rates, deliveryHours) {
-    if (isDirectHoursType(p.type) || !hasFlowEstimate(p)) {
+    if (isDirectHoursType(p.type) || !usesCalculatedPhases(p)) {
       return { hours: 0, mode: "none", calls: 0, kickoff: 0, weeks: null };
     }
     if (p.weeks == null || p.weeks === "") {
@@ -2563,7 +2568,7 @@
     }
 
     const directHours = isDirectHoursType(p.type);
-    const monthlyOnly = !directHours && !hasFlowEstimate(p);
+    const monthlyOnly = !directHours && !usesCalculatedPhases(p);
     let totalSP =
       (LOOKUPS.typeBase[p.type] || 0) +
       (LOOKUPS.categoryWeight[p.category] || 0) +
@@ -2655,7 +2660,7 @@
     ensurePhaseQuarters(p, quarter);
 
     // Other hours are entered per quarter. Team Task topics keep imported dated hours.
-    const monthOnly = !isDirectHoursType(p.type) && !hasFlowEstimate(p);
+    const monthOnly = !isDirectHoursType(p.type) && !usesCalculatedPhases(p);
     const planned = planOverlapsQuarter(p, quarter);
     const enteredHere = quarterHoursOf(p, quarter) > 0;
     if (planned === false && !phaseAssignedToQuarter(p, quarter) && !enteredHere) {
@@ -2764,7 +2769,7 @@
 
   function addEnteredMonthHours(result, p, quarter, month) {
     if (isDirectHoursType(p.type)) return result;
-    if (hasFlowEstimate(p) && p.source !== "manual") return result;
+    if (usesCalculatedPhases(p) && p.source !== "manual") return result;
     const extra = enteredMonthHours(p, quarter, month);
     if (!extra) return result;
     return {
@@ -3675,7 +3680,7 @@
   }
 
   function setMonthHours(p, key, raw) {
-    if (hasFlowEstimate(p) && p.source !== "manual") {
+    if (usesCalculatedPhases(p) && p.source !== "manual") {
       clearMonthHoursForFlows(p);
       return;
     }
