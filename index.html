@@ -47,7 +47,7 @@
         </label>
         <button type="button" id="btnAdd" class="btn primary estimator-action">Add project</button>
         <button type="button" id="btnCheckRocketlane" class="btn estimator-action">Check Rocketlane</button>
-        <input id="githubDispatchToken" class="github-token-input estimator-action hidden" type="password" autocomplete="off" placeholder="GitHub token" />
+        <input id="rocketlaneCheckKey" class="github-token-input estimator-action hidden" type="password" autocomplete="off" placeholder="Rocketlane API key" />
         <span id="rocketlaneCheckStatus" class="table-sub estimator-action"></span>
         <button type="button" id="btnImport" class="btn estimator-action">Import RL CSV</button>
         <input id="importCsvInput" type="file" accept=".csv,text/csv" multiple hidden />
@@ -325,6 +325,6 @@
   <script src="okr-progress-2026.js?v=rl-refresh-oct26"></script>
   <script src="local-snapshot.js?v=20261102T203906"></script>
   <script src="rocketlane-sync.js?v=20261102T203906"></script>
-  <script src="app.js?v=check-rocketlane"></script>
+  <script src="app.js?v=rocketlane-key-check"></script>
 </body>
 </html>

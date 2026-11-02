@@ -604,9 +604,6 @@
   }
 
   const RL_KEY_STORAGE = "integration-delivery-rl-key";
-  const GH_DISPATCH_STORAGE = "integration-delivery-gh-dispatch";
-  const GH_REPO = "nurisabuncu-alt/integration-delivery-tracker";
-  const GH_WORKFLOW = "rocketlane-sync.yml";
   let rocketlaneSearchResults = [];
 
   function projectSource(p) {
@@ -1235,12 +1232,18 @@
     return keys.size;
   }
 
+  function rocketlaneRequestUrl(path) {
+    const host = location.hostname;
+    const local = host === "localhost" || host === "127.0.0.1" || host === "";
+    return (local ? "/rocketlane" : "https://api.rocketlane.com") + path;
+  }
+
   async function rocketlaneGetJson(apiKey, path) {
     let lastError = null;
     for (let attempt = 1; attempt <= 4; attempt += 1) {
       let response;
       try {
-        response = await fetch(`/rocketlane${path}`, {
+        response = await fetch(rocketlaneRequestUrl(path), {
           cache: "no-store",
           headers: { "api-key": apiKey, accept: "application/json" },
         });
@@ -1248,7 +1251,9 @@
         const detail = String((error && error.message) || error || "network error");
         lastError = new Error(
           /failed to fetch|networkerror|load failed/i.test(detail)
-            ? "Preview server did not respond. Reload this page, then sync again."
+            ? location.hostname === "localhost" || location.hostname === "127.0.0.1"
+              ? "Preview server did not respond. Reload this page, then sync again."
+              : "Rocketlane did not respond."
             : detail
         );
         if (attempt === 4) throw lastError;
@@ -3205,7 +3210,7 @@
     btnModeQuick: document.getElementById("btnModeQuick"),
     btnModeFull: document.getElementById("btnModeFull"),
     btnCheckRocketlane: document.getElementById("btnCheckRocketlane"),
-    githubDispatchToken: document.getElementById("githubDispatchToken"),
+    rocketlaneCheckKey: document.getElementById("rocketlaneCheckKey"),
     rocketlaneCheckStatus: document.getElementById("rocketlaneCheckStatus"),
     statProjects: document.getElementById("statProjects"),
     statProjectsLabel: document.getElementById("statProjectsLabel"),
@@ -5768,97 +5773,338 @@
     render();
   });
 
-  function githubHeaders(token) {
-    return {
-      Authorization: "Bearer " + token,
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-    };
-  }
-
-  async function waitForRocketlaneRun(token, startedMs) {
-    const url = "https://api.github.com/repos/" + GH_REPO + "/actions/workflows/" + GH_WORKFLOW + "/runs?per_page=5";
-    for (let attempt = 0; attempt < 36; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 4000 : 20000));
-      const response = await fetch(url, { headers: githubHeaders(token), cache: "no-store" });
-      if (!response.ok) throw new Error("GitHub returned " + response.status + " while waiting.");
-      const payload = await response.json();
-      const runs = Array.isArray(payload.workflow_runs) ? payload.workflow_runs : [];
-      const run = runs.find(
-        (item) => item.event === "workflow_dispatch" && Date.parse(item.created_at) >= startedMs - 15000
-      );
-      if (run && run.status === "completed") return run;
-      els.rocketlaneCheckStatus.textContent = "Checking Rocketlane…";
+  function rocketlaneTemplateName(project) {
+    const sources = project && project.sources;
+    if (!Array.isArray(sources)) return "";
+    for (const source of sources) {
+      if (source && source.templateName) return String(source.templateName);
     }
-    throw new Error("The Rocketlane check is still running. Refresh in a few minutes.");
+    return "";
   }
 
-  async function loadPublishedRocketlaneSync(token) {
-    const response = await fetch(
-      "https://api.github.com/repos/" + GH_REPO + "/contents/rocketlane-sync.js?ref=main",
-      { headers: Object.assign(githubHeaders(token), { Accept: "application/vnd.github.raw" }), cache: "no-store" }
+  function isIntegrationTemplateName(name) {
+    const value = String(name || "");
+    if (/do not use/i.test(value)) return false;
+    if (value.includes("(Integration)")) return true;
+    if (/\(Onboarding\/Integration\)/i.test(value)) return true;
+    if (/Integration Project Template|Integration Template/i.test(value)) return true;
+    return false;
+  }
+
+  function rosterFromRocketlaneName(userName) {
+    const value = String(userName || "").toLowerCase();
+    if (value.includes("onur")) return "Onur";
+    if (value.includes("cihan")) return "Cihan";
+    if (value.includes("uygar")) return "Uygar";
+    if (value.includes("parlier") || value === "john") return "John";
+    return "";
+  }
+
+  function rocketlaneMemberName(person) {
+    if (!person || typeof person !== "object") return "";
+    return [person.firstName, person.lastName].filter(Boolean).join(" ").trim();
+  }
+
+  function rocketlaneTaskMembers(task) {
+    const members = task && task.assignees && task.assignees.members;
+    if (!members) return [];
+    return Array.isArray(members) ? members : [members];
+  }
+
+  async function rocketlanePageRows(apiKey, path) {
+    const rows = [];
+    let next = path;
+    let guard = 0;
+    while (next && guard < 40) {
+      guard += 1;
+      const payload = await rocketlaneGetJson(apiKey, next);
+      (Array.isArray(payload.data) ? payload.data : []).forEach((row) => rows.push(row));
+      const page = payload.pagination;
+      if (!(page && page.hasMore && page.nextPage)) break;
+      next = String(page.nextPage).replace(/^https?:\/\/api\.rocketlane\.com/i, "");
+      if (!next.startsWith("/")) next = "/" + next.replace(/^\/+/, "");
+    }
+    return rows;
+  }
+
+  function quartersForPerson(phaseQuarters, phasesActive) {
+    const found = [];
+    PHASE_KEYS.forEach((key) => {
+      if (phasesActive && phasesActive[key] !== true) return;
+      const quarter = phaseQuarters && phaseQuarters[key];
+      if (!quarter || !String(quarter).endsWith("2026") || found.includes(quarter)) return;
+      found.push(quarter);
+    });
+    return found;
+  }
+
+  function keysForPersonQuarter(phaseQuarters, phasesActive, quarter) {
+    return PHASE_KEYS.filter((key) => {
+      if (phasesActive && phasesActive[key] !== true) return false;
+      return phaseQuarters && phaseQuarters[key] === quarter;
+    });
+  }
+
+  function progressForPersonQuarter(phaseRows, tasks, keys) {
+    const allowed = new Set(keys);
+    const phaseIds = new Set();
+    (phaseRows || []).forEach((phase) => {
+      const names = impactKeysFromPhaseName(phase.phaseName || phase.name);
+      if (names.some((key) => allowed.has(key))) phaseIds.add(String(phase.phaseId || ""));
+    });
+    const relevantPhases = (phaseRows || []).filter((phase) => phaseIds.has(String(phase.phaseId || "")));
+    const relevantTasks = (tasks || []).filter((task) =>
+      phaseIds.has(String((task.phase && task.phase.phaseId) || ""))
     );
-    if (!response.ok) throw new Error("Could not load the Rocketlane update.");
-    const text = await response.text();
-    const marker = text.indexOf("{");
-    const end = text.lastIndexOf("}");
-    if (marker < 0 || end < marker) throw new Error("The Rocketlane update was empty.");
-    window.ROCKETLANE_SYNC = JSON.parse(text.slice(marker, end + 1));
+    if (!relevantPhases.length) return blankOkrPhases();
+    return computeRocketlaneOkrPhases(relevantPhases, relevantTasks);
+  }
+
+  function portfolioRowsFromRocketlane(detail, tasks, phaseRows, allocations) {
+    const ownerName = [detail.owner && detail.owner.firstName, detail.owner && detail.owner.lastName]
+      .filter(Boolean)
+      .join(" ");
+    const owner = rosterFromRocketlaneName(ownerName);
+    const people = new Set();
+    if (owner) people.add(owner);
+    (tasks || []).forEach((task) => {
+      rocketlaneTaskMembers(task).forEach((member) => {
+        const person = rosterFromRocketlaneName(rocketlaneMemberName(member));
+        if (person) people.add(person);
+      });
+    });
+    (allocations || []).forEach((row) => {
+      const person = rosterFromRocketlaneName(rocketlaneMemberName(row.member));
+      if (person) people.add(person);
+    });
+    if (!people.size) return [];
+    const primary = people.has(owner) ? owner : [...people][0];
+    const template = rocketlaneTemplateName(detail);
+    const typeName = String(detail.projectName || "");
+    const typeSource = template.toLowerCase();
+    const type = /premium api|premium support/i.test(typeName) || typeSource.includes("premium")
+      ? "Premium API Support"
+      : typeSource.includes("generic") || /generic/i.test(typeName)
+        ? "Generic"
+        : "Custom";
+    const planStart = detail.startDate || "";
+    const planDue = detail.dueDate || "";
+    const lifecycle = type === "Generic" || type === "Custom";
+    const dues = phaseDueMapFromRows(phaseRows);
+    const fromTasks = phaseQuartersFromRocketlaneTasks(tasks, planStart, planDue, state.quarter || "Q4 2026");
+    const phaseQuarters = lifecycle
+      ? quartersFromPhaseDueDates(dues, fromTasks) || fromTasks
+      : defaultPhaseQuarters(quarterFromDate(planDue || planStart) || state.quarter || "Q4 2026");
+    const phaseNames = {};
+    (phaseRows || []).forEach((phase) => {
+      phaseNames[String(phase.phaseId || "")] = phase.phaseName || phase.name || "";
+    });
+    const rocketlaneId = String(detail.projectId || detail.id);
+    const statusLabel = String((detail.status && detail.status.label) || "").toLowerCase();
+    const status = statusLabel === "completed"
+      ? "Complete"
+      : statusLabel === "cancelled"
+        ? "Cancelled"
+        : statusLabel === "on hold"
+          ? "OnHold"
+          : "InProgress";
+    return [...people].map((person) => {
+      const share = person !== primary;
+      const included = new Set();
+      (tasks || []).forEach((task) => {
+        const onTask = rocketlaneTaskMembers(task).some(
+          (member) => rosterFromRocketlaneName(rocketlaneMemberName(member)) === person
+        );
+        if (!onTask) return;
+        const phaseId = task.phase && String(task.phase.phaseId || "");
+        impactKeysFromPhaseName(phaseNames[phaseId] || "").forEach((key) => included.add(key));
+      });
+      (allocations || []).forEach((row) => {
+        if (rosterFromRocketlaneName(rocketlaneMemberName(row.member)) !== person) return;
+        impactKeysFromPhaseName(phaseNames[String(row.workId || "")] || "").forEach((key) => included.add(key));
+      });
+      const phasesActive = share
+        ? PHASE_KEYS.reduce((active, key) => {
+            active[key] = included.has(key);
+            return active;
+          }, {})
+        : null;
+      const flowKeys = new Set();
+      if (lifecycle) {
+        (tasks || []).forEach((task) => {
+          const key = developmentFlowKey(task.taskName || task.name);
+          if (!key) return;
+          const names = rocketlaneTaskMembers(task)
+            .map((member) => rosterFromRocketlaneName(rocketlaneMemberName(member)))
+            .filter(Boolean);
+          if (names.includes(person) || (!names.length && person === owner)) flowKeys.add(key);
+        });
+      }
+      return {
+        id: share ? "rl-" + rocketlaneId + "~" + person : "rl-" + rocketlaneId,
+        name: detail.projectName || "Rocketlane " + rocketlaneId,
+        assignee: person,
+        type,
+        status,
+        category: "Other",
+        effort: "New Development",
+        std: flowKeys.size,
+        cpx: 0,
+        ins: 0,
+        dependency: "Stable",
+        mapping: "Simple",
+        connection: "Other",
+        erpCutover: false,
+        premiumHours: 0,
+        weeks: null,
+        okr: 0,
+        notes: [template || "Rocketlane", share ? "Shared portfolio · " + person : ""].filter(Boolean).join(" · "),
+        quarterFocus: "full",
+        phaseQuarters,
+        phasesActive,
+        source: "rocketlane",
+        rocketlaneId,
+        portfolioShare: share,
+        flowCountFromTasks: true,
+        updateFlowCount: true,
+        planStart,
+        planDue,
+        phaseDueDates: dues || undefined,
+        hoursByMonth: {},
+        hoursByQuarter: {},
+        compliance: {
+          inScope: person === owner && owner !== "",
+          owner: person,
+          phase: "Initiate",
+          controls: {},
+        },
+      };
+    }).filter((row) => quartersForPerson(row.phaseQuarters, row.phasesActive).length);
+  }
+
+  function addPingedRocketlaneProject(row, phaseRows, tasks) {
+    if (state.projects.some((project) => project.id === row.id)) return false;
+    state.projects.push(row);
+    ensureOkrState(state);
+    const linkId = row.id.replace(/^rl-/, "");
+    quartersForPerson(row.phaseQuarters, row.phasesActive).forEach((quarter) => {
+      if (state.okr.rows.some((item) => item.rocketlaneProjectId === linkId && item.quarter === quarter)) return;
+      const phases = progressForPersonQuarter(
+        phaseRows,
+        tasks,
+        keysForPersonQuarter(row.phaseQuarters, row.phasesActive, quarter)
+      );
+      state.okr.rows.push(
+        okrRow({
+          quarter,
+          objective: okrObjectiveForProject(row),
+          keyResult: row.name,
+          weight: 0,
+          projectType: okrProjectType(row),
+          owner: row.assignee,
+          rocketlaneProjectId: linkId,
+          phases,
+          syncSource: "Rocketlane project",
+          syncedAt: new Date().toISOString(),
+          syncName: true,
+        })
+      );
+    });
+    return true;
   }
 
   async function checkRocketlaneNow() {
     const button = els.btnCheckRocketlane;
     const status = els.rocketlaneCheckStatus;
-    const tokenInput = els.githubDispatchToken;
+    const keyInput = els.rocketlaneCheckKey;
     button.disabled = true;
-    const token = (tokenInput.value || localStorage.getItem(GH_DISPATCH_STORAGE) || "").trim();
-    if (!token) {
-      tokenInput.classList.remove("hidden");
-      status.textContent = "Paste a GitHub token that can start Actions. It stays in this browser.";
+    try {
+      localStorage.removeItem("integration-delivery-gh-dispatch");
+    } catch (error) {
+      /* The old field stored this key in the wrong place. */
+    }
+    const apiKey = (keyInput.value || localStorage.getItem(RL_KEY_STORAGE) || "").trim();
+    if (!apiKey) {
+      keyInput.classList.remove("hidden");
+      status.textContent = "Paste the Rocketlane API key. It stays in this browser.";
       button.disabled = false;
-      tokenInput.focus();
+      keyInput.focus();
       return;
     }
-    localStorage.setItem(GH_DISPATCH_STORAGE, token);
-    tokenInput.value = "";
-    tokenInput.classList.add("hidden");
+    localStorage.setItem(RL_KEY_STORAGE, apiKey);
+    keyInput.value = "";
+    keyInput.classList.add("hidden");
     status.textContent = "Checking Rocketlane…";
-    const startedMs = Date.now();
     try {
-      const response = await fetch(
-        "https://api.github.com/repos/" + GH_REPO + "/actions/workflows/" + GH_WORKFLOW + "/dispatches",
-        {
-          method: "POST",
-          headers: Object.assign(githubHeaders(token), { "Content-Type": "application/json" }),
-          body: JSON.stringify({ ref: "main" }),
-        }
+      const known = new Set(
+        state.projects
+          .map((project) => String(project.rocketlaneId || String(project.id || "").replace(/^rl-/, "").split("~")[0]))
+          .filter((id) => /^\d+$/.test(id))
       );
-      if (response.status === 401 || response.status === 403) {
-        localStorage.removeItem(GH_DISPATCH_STORAGE);
-        tokenInput.classList.remove("hidden");
-        status.textContent = "GitHub rejected that token. Paste a token that can start Actions.";
-        button.disabled = false;
-        tokenInput.focus();
-        return;
+      const projects = await rocketlanePageRows(apiKey, "/api/1.0/projects?pageSize=100&includeAllFields=true");
+      let added = 0;
+      for (const project of projects) {
+        const id = String(project.projectId || "");
+        if (!id || known.has(id)) continue;
+        if (project.archived === true || String(project.archived) === "True") continue;
+        let detail = project;
+        let template = rocketlaneTemplateName(project);
+        if (!template) {
+          detail = (await fetchRocketlaneProject(apiKey, id)) || project;
+          template = rocketlaneTemplateName(detail);
+        }
+        const source = template + " " + (detail.projectName || project.projectName || "");
+        if (/impact methodology|logiwa io-impact/i.test(source)) continue;
+        if (!isIntegrationTemplateName(template)) continue;
+        status.textContent = "Checking " + (detail.projectName || project.projectName || id) + "…";
+        const phaseRows = await fetchRocketlanePhaseRows(apiKey, id);
+        const dues = phaseDueMapFromRows(phaseRows);
+        const dueQuarters = dues ? PHASE_KEYS.map((key) => quarterFromDate(dues[key])).filter(Boolean) : [];
+        let tasks = null;
+        let allocations = null;
+        if (dueQuarters.length && !dueQuarters.some((quarter) => String(quarter).endsWith("2026"))) continue;
+        if (!dueQuarters.length) {
+          tasks = await fetchRocketlaneTasksForOkr(apiKey, id);
+          const allocationQuarters = await fetchRocketlaneAllocationQuarters(apiKey, id);
+          const taskIn2026 = tasks.some((task) => {
+            const quarter = quarterFromDate(task.dueDate || task.startDate);
+            return quarter && String(quarter).endsWith("2026");
+          });
+          const allocationIn2026 = allocationQuarters.some((quarter) => String(quarter).endsWith("2026"));
+          const planStart = detail.startDate || project.startDate || "";
+          const planDue = detail.dueDate || project.dueDate || "";
+          const planIn2026 = (planStart && planStart <= "2026-12-31" && (planDue || planStart) >= "2026-01-01")
+            || (planDue && planDue >= "2026-01-01" && (planStart || planDue) <= "2026-12-31");
+          if (!taskIn2026 && !allocationIn2026 && !planIn2026) continue;
+        }
+        if (detail === project) detail = (await fetchRocketlaneProject(apiKey, id)) || project;
+        if (!tasks) tasks = await fetchRocketlaneTasksForOkr(apiKey, id);
+        if (!allocations) {
+          allocations = await rocketlanePageRows(
+            apiKey,
+            "/api/1.0/resource-allocations?startDate=2026-01-01&endDate=2026-12-31&pageSize=100&includeAllFields=true&projectId.eq=" +
+              encodeURIComponent(id)
+          );
+        }
+        portfolioRowsFromRocketlane(detail, tasks, phaseRows, allocations).forEach((row) => {
+          if (addPingedRocketlaneProject(row, phaseRows, tasks)) added += 1;
+        });
       }
-      if (!response.ok && response.status !== 204) throw new Error("GitHub returned " + response.status + ".");
-      const run = await waitForRocketlaneRun(token, startedMs);
-      if (!run || run.conclusion !== "success") throw new Error("The Rocketlane check did not finish.");
-      const before = state.projects.length;
-      await loadPublishedRocketlaneSync(token);
-      const projectsChanged = addPublishedRocketlaneProjects(state);
-      const okrChanged = addPublishedRocketlaneOkrRows(state);
-      const phasesChanged = applyPublishedRocketlaneOkr(state);
-      if (projectsChanged || okrChanged || phasesChanged) save();
-      const added = state.projects.length - before;
+      if (added) save();
       render();
       status.textContent = added
         ? "Added " + added + (added === 1 ? " project." : " projects.")
-        : phasesChanged || okrChanged
-          ? "No new projects. Progress was refreshed."
-          : "No new projects.";
+        : "No new projects.";
     } catch (error) {
-      status.textContent = (error && error.message) || "Rocketlane check failed.";
+      const message = (error && error.message) || "Rocketlane check failed.";
+      if (/401|403|rejected/i.test(message)) {
+        localStorage.removeItem(RL_KEY_STORAGE);
+        keyInput.classList.remove("hidden");
+        status.textContent = "Rocketlane rejected that key.";
+        keyInput.focus();
+      } else {
+        status.textContent = message;
+      }
     }
     button.disabled = false;
   }
