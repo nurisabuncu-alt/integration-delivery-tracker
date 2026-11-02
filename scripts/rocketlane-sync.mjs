@@ -1,7 +1,7 @@
 // Scheduled Rocketlane refresh.
-// Adds integration-template projects created on or after 2026-10-21.
-// Refreshes OKR phase progress on rows already linked to a Rocketlane project.
-// Does not change existing estimator or compliance fields, manual OKR rows, or month hours.
+// Includes an integration-template project when one of its phases falls in a 2026 quarter.
+// Created date and project status are not filters. Archived, "do not use", and
+// Logiwa IO-IMPACT Methodology templates are skipped. Month hours are not imported.
 // Does not call the time-entries API.
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -12,7 +12,6 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const snapshotPath = join(root, "local-snapshot.js");
 const syncPath = join(root, "rocketlane-sync.js");
 const indexPath = join(root, "index.html");
-const createdSinceMs = Date.parse("2026-10-21T00:00:00Z");
 const phaseKeys = ["initiate", "mapping", "package", "adapt", "commence", "transition"];
 const okrPhaseKeys = ["projectManagement", "mapping", "design", "development", "proofOfDelivery"];
 const shellNames = {
@@ -182,6 +181,11 @@ function isIntegrationTemplate(name) {
   return false;
 }
 
+function isImpactMethodology(project, template) {
+  const source = `${template || ""} ${templateName(project)} ${project && (project.projectName || project.name) || ""}`;
+  return /impact methodology|logiwa io-impact/i.test(source);
+}
+
 function mapAssignee(userName) {
   const value = String(userName || "").toLowerCase();
   if (value.includes("onur")) return "Onur";
@@ -309,12 +313,6 @@ function computeOkrPhases(phaseRows, taskRows) {
   return { phases, taskCount };
 }
 
-function createdMs(project) {
-  const value = Number(project && project.createdAt);
-  if (!Number.isFinite(value) || value <= 0) return 0;
-  return value < 1e12 ? value * 1000 : value;
-}
-
 async function rocketlaneGet(path) {
   if (/time-entries/i.test(path)) throw new Error("Time entries are not part of this refresh.");
   let lastError = null;
@@ -438,7 +436,7 @@ function buildPortfolioRows(detail, tasks, phaseRows, allocations, fallbackQuart
     const person = rosterPerson(row.member);
     if (person) people.add(person);
   });
-  if (!people.size) people.add("Unassigned");
+  if (!people.size) return [];
   const primary = people.has(owner) ? owner : [...people][0];
   const customer = (detail.customer && (detail.customer.companyName || detail.customer.customerName)) || "";
   const template = templateName(detail);
@@ -492,9 +490,61 @@ function buildPortfolioRows(detail, tasks, phaseRows, allocations, fallbackQuart
       phaseDueDates: dues || undefined,
       hoursByMonth: {},
       hoursByQuarter: {},
-      compliance: { inScope: !share, owner: person === "Unassigned" ? "" : person },
+      compliance: {
+        inScope: person === owner && owner !== "Unassigned",
+        owner: person === "Unassigned" ? "" : person,
+        phase: "Initiate",
+        controls: {},
+      },
     };
   });
+}
+
+function blankOkrPhases() {
+  return { projectManagement: 0, mapping: 0, design: 0, development: 0, proofOfDelivery: 0 };
+}
+
+function rangeOverlaps2026(start, due) {
+  const from = String(start || "").slice(0, 10);
+  const to = String(due || "").slice(0, 10);
+  const startOk = /^\d{4}-\d{2}-\d{2}$/.test(from);
+  const dueOk = /^\d{4}-\d{2}-\d{2}$/.test(to);
+  if (!startOk && !dueOk) return null;
+  const left = startOk ? from : to;
+  const right = dueOk ? to : from;
+  return left <= "2026-12-31" && right >= "2026-01-01";
+}
+
+function quartersFor(phaseQuarters, phasesActive) {
+  const found = [];
+  phaseKeys.forEach((key) => {
+    if (phasesActive && phasesActive[key] !== true) return;
+    const quarter = phaseQuarters && phaseQuarters[key];
+    if (!quarter || !String(quarter).endsWith("2026") || found.includes(quarter)) return;
+    found.push(quarter);
+  });
+  found.sort((left, right) => quarterSortKey(left) - quarterSortKey(right));
+  return found;
+}
+
+function keysForQuarter(phaseQuarters, phasesActive, quarter) {
+  return phaseKeys.filter((key) => {
+    if (phasesActive && phasesActive[key] !== true) return false;
+    return phaseQuarters && phaseQuarters[key] === quarter;
+  });
+}
+
+function progressForQuarter(phaseRows, tasks, keys) {
+  const allowed = new Set(keys);
+  const phaseIds = new Set();
+  (phaseRows || []).forEach((phase) => {
+    const names = impactKeysFromPhaseName(phase.phaseName || phase.name);
+    if (names.some((key) => allowed.has(key))) phaseIds.add(String(phase.phaseId || ""));
+  });
+  const relevantPhases = (phaseRows || []).filter((phase) => phaseIds.has(String(phase.phaseId || "")));
+  const relevantTasks = (tasks || []).filter((task) => phaseIds.has(String((task.phase && task.phase.phaseId) || "")));
+  if (!relevantPhases.length) return { phases: blankOkrPhases(), taskCount: 0 };
+  return computeOkrPhases(relevantPhases, relevantTasks);
 }
 
 const snapshot = readAssignment(snapshotPath, "LOCAL_SNAPSHOT");
@@ -506,18 +556,26 @@ if (!snapshot.okr) snapshot.okr = { rows: [] };
 if (!Array.isArray(sync.projects)) sync.projects = [];
 if (!sync.okrPhases) sync.okrPhases = {};
 
-const known = new Set(
-  snapshot.projects
-    .map((project) => String(project.rocketlaneId || String(project.id || "").replace(/^rl-/, "").split("~")[0]))
-    .filter((id) => /^\d+$/.test(id))
-);
 const fallbackQuarter = snapshot.quarter || "Q4 2026";
 const syncedAt = new Date().toISOString();
+const rebuild = !snapshot.timelinePortfolio2026;
 let added = 0;
+let removed = 0;
 let flowsUpdated = 0;
 let okrAdded = 0;
 let phasesUpdated = 0;
-const publishedOkrIds = new Set();
+const accepted = new Set();
+
+if (rebuild) {
+  const previousProjects = snapshot.projects.length;
+  const previousRows = (snapshot.okr && snapshot.okr.rows && snapshot.okr.rows.length) || 0;
+  snapshot.projects = [];
+  snapshot.okr = { quarter: snapshot.okr && snapshot.okr.quarter ? snapshot.okr.quarter : "Q4 2026", userFilter: "__all__", rows: [] };
+  sync.projects = [];
+  sync.okrRows = [];
+  sync.okrPhases = {};
+  console.log(`Replacing the current portfolio (${previousProjects} projects, ${previousRows} OKR rows).`);
+}
 
 function upsertSyncProject(row) {
   const index = sync.projects.findIndex((item) => item && item.id === row.id);
@@ -525,145 +583,243 @@ function upsertSyncProject(row) {
   else sync.projects.push(row);
 }
 
-function quarterForRow(phaseQuarters) {
-  const values = Object.values(phaseQuarters || {}).filter(Boolean);
-  if (values.includes(fallbackQuarter)) return fallbackQuarter;
-  values.sort((left, right) => quarterSortKey(left) - quarterSortKey(right));
-  return values[values.length - 1] || fallbackQuarter;
-}
-
-function ensurePortfolioOkr(row) {
-  const linkId = row.id.replace(/^rl-/, "");
-  publishedOkrIds.add(linkId);
-  if (snapshot.okr.rows.some((okr) => String(okr.rocketlaneProjectId || "") === linkId)) return;
-  snapshot.okr.rows.push({
-    id: `okr-${row.id}`,
-    quarter: quarterForRow(row.phaseQuarters),
-    objective: row.type === "Other" || row.type === "Misc" ? "Operational Excellence" : "Activated ARR",
-    keyResult: row.name,
-    details: row.notes || "",
-    goal: 100,
-    achievementOverride: null,
-    weight: 0,
-    feedback: "",
-    managerReview: "",
-    projectType: row.type === "Premium API Support" ? "API Support" : row.type === "Other" || row.type === "Misc" ? "Misc" : "Integration",
-    owner: row.assignee,
-    confidence: "Not set",
-    rocketlaneProjectId: linkId,
-    evidence: "",
-    phases: { projectManagement: 0, mapping: 0, design: 0, development: 0, proofOfDelivery: 0 },
-    phaseOverrides: {},
-    syncSource: "Rocketlane project",
-    syncName: true,
-  });
-  okrAdded += 1;
-}
-
-const projects = await rocketlanePages("/api/1.0/projects?pageSize=100&includeAllFields=true");
-console.log(`Scanned ${projects.length} Rocketlane projects.`);
-for (const project of projects) {
-  const id = String(project.projectId || "");
-  if (!id || createdMs(project) < createdSinceMs) continue;
-  const status = project.status && project.status.label;
-  if (project.archived === true || String(project.archived) === "True" || status === "Cancelled") continue;
-  const template = templateName(project);
-  if (!isIntegrationTemplate(template)) continue;
-  const detail = (await rocketlaneGet(`/api/1.0/projects/${encodeURIComponent(id)}?includeFields=budgetedHours,allocatedHours`)).data || project;
-  const tasks = await rocketlanePages(`/api/1.0/tasks?project.eq=${encodeURIComponent(id)}&pageSize=100&includeAllFields=true`);
-  const phaseRows = await rocketlanePages(`/api/1.0/phases?projectId=${encodeURIComponent(id)}&pageSize=100`);
-  const allocations = await rocketlanePages(`/api/1.0/resource-allocations?startDate=2025-01-01&endDate=2026-12-31&pageSize=100&includeAllFields=true&projectId.eq=${encodeURIComponent(id)}`);
-  const rows = buildPortfolioRows(detail, tasks, phaseRows, allocations, fallbackQuarter);
-  for (const row of rows) {
-    const existing = snapshot.projects.find((item) => item.id === row.id);
-    if (!existing) {
-      snapshot.projects.push(row);
-      upsertSyncProject(row);
-      ensurePortfolioOkr(row);
-      added += 1;
-      console.log(`Added ${row.id} ${row.assignee} flows=${row.std}`);
-      continue;
-    }
-    if (row.updateFlowCount && existing.flowCountFromTasks !== false && Number(existing.std) !== Number(row.std)) {
-      existing.std = row.std;
-      existing.cpx = 0;
-      existing.ins = 0;
-      existing.flowCountFromTasks = true;
-      upsertSyncProject(Object.assign({}, existing, { updateFlowCount: true, hoursByMonth: {}, hoursByQuarter: {} }));
-      flowsUpdated += 1;
-      console.log(`Flows ${row.id} ${row.assignee} ${row.std}`);
-    }
-    ensurePortfolioOkr(row);
+function upsertPortfolioRow(row) {
+  const existing = snapshot.projects.find((item) => item.id === row.id);
+  if (!existing) {
+    snapshot.projects.push(row);
+    added += 1;
+    const quarters = quartersFor(row.phaseQuarters, row.phasesActive).join(", ");
+    console.log(`Added ${row.id} ${row.assignee} flows=${row.std} ${quarters}`);
+    return;
   }
-  known.add(id);
+  if (row.updateFlowCount && existing.flowCountFromTasks !== false && Number(existing.std) !== Number(row.std)) {
+    existing.std = row.std;
+    existing.cpx = 0;
+    existing.ins = 0;
+    existing.flowCountFromTasks = true;
+    flowsUpdated += 1;
+  }
+  existing.phaseQuarters = row.phaseQuarters;
+  existing.phasesActive = row.phasesActive;
+  existing.phaseDueDates = row.phaseDueDates;
+  existing.planStart = row.planStart;
+  existing.planDue = row.planDue;
+  existing.status = row.status;
+  existing.portfolioShare = row.portfolioShare;
 }
 
-const linked = [];
-(snapshot.okr.rows || []).forEach((row) => {
-  const projectId = String(row.rocketlaneProjectId || "").split("~")[0];
-  if (!/^\d+$/.test(projectId) || linked.includes(projectId)) return;
-  const project = snapshot.projects.find((item) => String(item.rocketlaneId || "") === projectId || String(item.id) === `rl-${projectId}`);
-  if (project && String(project.id).startsWith("rl-")) linked.push(projectId);
-});
-
-for (const projectId of linked) {
-  const phaseRows = await rocketlanePages(`/api/1.0/phases?projectId=${encodeURIComponent(projectId)}&pageSize=100`);
-  const tasks = await rocketlanePages(`/api/1.0/tasks?project.eq=${encodeURIComponent(projectId)}&pageSize=100&includeAllFields=true`);
-  const computed = computeOkrPhases(phaseRows, tasks);
-  const previous = sync.okrPhases[projectId];
-  const same = previous && okrPhaseKeys.every((key) => Number(previous.phases && previous.phases[key]) === computed.phases[key]);
-  sync.okrPhases[projectId] = { phases: computed.phases, taskCount: computed.taskCount, syncedAt };
-  (snapshot.okr.rows || []).forEach((row) => {
-    const rowProjectId = String(row.rocketlaneProjectId || "");
-    if (rowProjectId !== projectId && !rowProjectId.startsWith(`${projectId}~`)) return;
-    if (!row.phases) row.phases = {};
-    if (!row.phaseOverrides) row.phaseOverrides = {};
+function syncQuarterOkrs(row, phaseRows, tasks) {
+  const quarters = quartersFor(row.phaseQuarters, row.phasesActive);
+  const linkId = row.id.replace(/^rl-/, "");
+  const keep = new Set(quarters);
+  snapshot.okr.rows = snapshot.okr.rows.filter((okr) => {
+    if (String(okr.rocketlaneProjectId || "") !== linkId) return true;
+    return keep.has(okr.quarter);
+  });
+  quarters.forEach((quarter) => {
+    const computed = progressForQuarter(phaseRows, tasks, keysForQuarter(row.phaseQuarters, row.phasesActive, quarter));
+    sync.okrPhases[`${linkId}|${quarter}`] = {
+      phases: computed.phases,
+      taskCount: computed.taskCount,
+      quarter,
+      syncedAt,
+    };
+    const existing = snapshot.okr.rows.find(
+      (okr) => String(okr.rocketlaneProjectId || "") === linkId && okr.quarter === quarter
+    );
+    if (!existing) {
+      snapshot.okr.rows.push({
+        id: `okr-${row.id}-${quarter.replace(/\s+/g, "")}`,
+        quarter,
+        objective: row.type === "Other" || row.type === "Misc" ? "Operational Excellence" : "Activated ARR",
+        keyResult: row.name,
+        details: "",
+        goal: 100,
+        achievementOverride: null,
+        weight: 0,
+        feedback: "",
+        managerReview: "",
+        projectType: row.type === "Premium API Support" ? "API Support" : row.type === "Other" || row.type === "Misc" ? "Misc" : "Integration",
+        owner: row.assignee,
+        confidence: "Not set",
+        rocketlaneProjectId: linkId,
+        evidence: "",
+        phases: computed.phases,
+        phaseOverrides: {},
+        syncSource: `Rocketlane · ${computed.taskCount} tasks`,
+        syncedAt,
+        syncName: true,
+      });
+      okrAdded += 1;
+      return;
+    }
+    if (!existing.phases) existing.phases = blankOkrPhases();
+    if (!existing.phaseOverrides) existing.phaseOverrides = {};
     let changed = false;
     okrPhaseKeys.forEach((key) => {
-      if (row.phaseOverrides[key]) return;
-      if (Number(row.phases[key]) !== computed.phases[key]) {
-        row.phases[key] = computed.phases[key];
+      if (existing.phaseOverrides[key]) return;
+      if (Number(existing.phases[key]) !== Number(computed.phases[key])) {
+        existing.phases[key] = computed.phases[key];
         changed = true;
       }
     });
     if (!changed) return;
-    const overrideCount = okrPhaseKeys.filter((key) => row.phaseOverrides[key]).length;
-    row.syncSource = `Rocketlane · ${computed.taskCount} tasks${overrideCount ? ` · ${overrideCount} manual override${overrideCount === 1 ? "" : "s"}` : ""}`;
-    row.syncedAt = syncedAt;
+    const overrideCount = okrPhaseKeys.filter((key) => existing.phaseOverrides[key]).length;
+    existing.syncSource = `Rocketlane · ${computed.taskCount} tasks${overrideCount ? ` · ${overrideCount} manual override${overrideCount === 1 ? "" : "s"}` : ""}`;
+    existing.syncedAt = syncedAt;
     phasesUpdated += 1;
   });
-  if (!same) console.log(`OKR ${projectId} ${okrPhaseKeys.map((key) => computed.phases[key]).join("/")}`);
 }
 
-const previousOkrLinks = new Set((sync.okrRows || []).map((row) => String(row.rocketlaneProjectId || "")));
-const okrSeen = new Set();
+const projects = await rocketlanePages("/api/1.0/projects?pageSize=100&includeAllFields=true");
+console.log(`Scanned ${projects.length} Rocketlane projects.`);
+let skippedArchived = 0;
+let skippedImpact = 0;
+let skippedTemplate = 0;
+let skippedTimeline = 0;
+let skippedPeople = 0;
+for (const project of projects) {
+  const id = String(project.projectId || "");
+  if (!id) continue;
+  if (project.archived === true || String(project.archived) === "True") {
+    skippedArchived += 1;
+    continue;
+  }
+  let detail = project;
+  let template = templateName(project);
+  if (!template) {
+    detail = (await rocketlaneGet(`/api/1.0/projects/${encodeURIComponent(id)}?includeFields=budgetedHours,allocatedHours`)).data || project;
+    template = templateName(detail);
+  }
+  if (isImpactMethodology(detail, template)) {
+    skippedImpact += 1;
+    continue;
+  }
+  if (!isIntegrationTemplate(template)) {
+    skippedTemplate += 1;
+    continue;
+  }
+  const phaseRows = await rocketlanePages(`/api/1.0/phases?projectId=${encodeURIComponent(id)}&pageSize=100`);
+  const dues = phaseDueMap(phaseRows);
+  const dueQuarters = dues ? phaseKeys.map((key) => quarterFromDate(dues[key])).filter(Boolean) : [];
+  const duesIn2026 = dueQuarters.some((quarter) => quarter.endsWith("2026"));
+  let tasks = null;
+  let allocations = null;
+  if (dueQuarters.length && !duesIn2026) {
+    skippedTimeline += 1;
+    continue;
+  }
+  if (!dueQuarters.length) {
+    const overlap = rangeOverlaps2026(detail.startDate || project.startDate, detail.dueDate || project.dueDate);
+    tasks = await rocketlanePages(`/api/1.0/tasks?project.eq=${encodeURIComponent(id)}&pageSize=100&includeAllFields=true`);
+    allocations = await rocketlanePages(`/api/1.0/resource-allocations?startDate=2026-01-01&endDate=2026-12-31&pageSize=100&includeAllFields=true&projectId.eq=${encodeURIComponent(id)}`);
+    const taskIn2026 = tasks.some((task) => {
+      const quarter = quarterFromDate(task.dueDate || task.startDate);
+      return quarter && quarter.endsWith("2026");
+    });
+    const allocationIn2026 = allocationQuarters(allocations).some((quarter) => quarter.endsWith("2026"));
+    if (!taskIn2026 && !allocationIn2026 && overlap !== true) {
+      skippedTimeline += 1;
+      continue;
+    }
+  }
+  if (detail === project) {
+    detail = (await rocketlaneGet(`/api/1.0/projects/${encodeURIComponent(id)}?includeFields=budgetedHours,allocatedHours`)).data || project;
+  }
+  if (!tasks) tasks = await rocketlanePages(`/api/1.0/tasks?project.eq=${encodeURIComponent(id)}&pageSize=100&includeAllFields=true`);
+  if (!allocations) {
+    allocations = await rocketlanePages(`/api/1.0/resource-allocations?startDate=2026-01-01&endDate=2026-12-31&pageSize=100&includeAllFields=true&projectId.eq=${encodeURIComponent(id)}`);
+  }
+  const rows = buildPortfolioRows(detail, tasks, phaseRows, allocations, fallbackQuarter).filter((row) =>
+    quartersFor(row.phaseQuarters, row.phasesActive).length
+  );
+  if (!rows.length) {
+    skippedPeople += 1;
+    continue;
+  }
+  accepted.add(id);
+  rows.forEach((row) => {
+    upsertPortfolioRow(row);
+    upsertSyncProject(row);
+    syncQuarterOkrs(row, phaseRows, tasks);
+  });
+}
+
+if (!rebuild) {
+  const before = snapshot.projects.length;
+  snapshot.projects = snapshot.projects.filter((project) => {
+    if (!project) return false;
+    if (project.source === "manual") return true;
+    if (!String(project.id || "").startsWith("rl-")) return true;
+    const rocketlaneId = String(project.rocketlaneId || String(project.id).replace(/^rl-/, "").split("~")[0]);
+    return accepted.has(rocketlaneId);
+  });
+  removed = before - snapshot.projects.length;
+  const liveLinks = new Set(snapshot.projects.filter((project) => String(project.id || "").startsWith("rl-")).map((project) => String(project.id).replace(/^rl-/, "")));
+  snapshot.okr.rows = snapshot.okr.rows.filter((row) => {
+    const linkId = String(row.rocketlaneProjectId || "");
+    if (!linkId) return true;
+    return liveLinks.has(linkId);
+  });
+}
+
+Object.assign(snapshot, {
+  portfolioReplaceId: "2026-11-02-timeline",
+  timelinePortfolio2026: true,
+  portfolioSource: snapshot.portfolioSource || "integration-templates-sep-oct-2026",
+  templateFlows2026: true,
+  lentifulFlowCorrection: true,
+  developmentSubtasks2026: true,
+  projectPlanQuarters2026: true,
+  phaseTimelineSpread2026: true,
+  allocationPhaseQuarters2026: true,
+  phaseDueQuarters2026: true,
+  flowMonthHoursCleared2026: true,
+  premiumMonthHours2026: true,
+  fullYearMonthHours2026: true,
+  okrManualEstimator2026: true,
+  okrOwnerProjects2026: true,
+  okrRocketlaneRefreshOct26: true,
+  okrCihanFromEstimator2026: true,
+  apparelMagicQuarters2026: true,
+  rocketlanePortfolioOct19: true,
+  onAirDirectPortfolio2026: true,
+  createdProjects2026: true,
+  johnPortfolio2026: true,
+  pipelineCompliance2026: true,
+  mcCompliance2026: true,
+  onurTeamTasks2026: true,
+});
+if (!snapshot.portfolioSource) snapshot.portfolioSource = "integration-templates-sep-oct-2026";
+snapshot.portfolioSource = "integration-templates-sep-oct-2026";
+
+sync.projects = snapshot.projects.filter((project) => String(project.id || "").startsWith("rl-"));
 sync.okrRows = [];
-(snapshot.okr.rows || []).forEach((row) => {
+const okrSeen = new Set();
+snapshot.okr.rows.forEach((row) => {
   const linkId = String(row.rocketlaneProjectId || "");
-  if (!linkId || okrSeen.has(linkId)) return;
-  if (!publishedOkrIds.has(linkId) && !linkId.includes("~")) return;
-  okrSeen.add(linkId);
+  const key = `${linkId}|${row.quarter}`;
+  if (!linkId || okrSeen.has(key)) return;
+  okrSeen.add(key);
   sync.okrRows.push(row);
 });
-(snapshot.projects || []).forEach((project) => {
-  if (project && project.portfolioShare) upsertSyncProject(project);
-});
-const okrPublishMissing = [...publishedOkrIds].some((linkId) => !previousOkrLinks.has(linkId));
 
-if (!added && !flowsUpdated && !okrAdded && !phasesUpdated && !okrPublishMissing) {
-  const baselineMissing = linked.some((projectId) => !sync.okrPhases[projectId]);
-  if (!baselineMissing) {
-    console.log("No Rocketlane changes.");
-    process.exit(0);
-  }
+console.log(
+  `Skipped ${skippedArchived} archived, ${skippedImpact} IMPACT methodology, ${skippedTemplate} other templates, ${skippedTimeline} outside 2026, ${skippedPeople} with no roster person.`
+);
+if (!rebuild && !added && !removed && !flowsUpdated && !okrAdded && !phasesUpdated) {
+  console.log("No Rocketlane changes.");
+  process.exit(0);
 }
 
 sync.syncedAt = syncedAt;
-if (added || flowsUpdated || okrAdded || phasesUpdated) writeAssignment(snapshotPath, "LOCAL_SNAPSHOT", snapshot);
+writeAssignment(snapshotPath, "LOCAL_SNAPSHOT", snapshot);
 writeAssignment(syncPath, "ROCKETLANE_SYNC", sync);
 const stamp = syncedAt.replace(/[-:]/g, "").slice(0, 15);
 let html = readFileSync(indexPath, "utf8");
 html = html.replace(/rocketlane-sync\.js\?v=[^"]+/, `rocketlane-sync.js?v=${stamp}`);
-if (added || flowsUpdated || okrAdded || phasesUpdated) html = html.replace(/local-snapshot\.js\?v=[^"]+/, `local-snapshot.js?v=${stamp}`);
+html = html.replace(/local-snapshot\.js\?v=[^"]+/, `local-snapshot.js?v=${stamp}`);
 writeFileSync(indexPath, html, "utf8");
-console.log(`Added ${added} portfolio row${added === 1 ? "" : "s"}. Updated ${flowsUpdated} flow count${flowsUpdated === 1 ? "" : "s"}, ${okrAdded} new OKR row${okrAdded === 1 ? "" : "s"}, and ${phasesUpdated} OKR phase row${phasesUpdated === 1 ? "" : "s"}.`);
+console.log(
+  `Portfolio ${snapshot.projects.length} projects, ${snapshot.okr.rows.length} OKR rows. Added ${added}, removed ${removed}, flows ${flowsUpdated}, new OKR rows ${okrAdded}, phase updates ${phasesUpdated}.`
+);

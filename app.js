@@ -2934,7 +2934,7 @@
     incoming.forEach((row) => {
       const linkId = String(row && row.rocketlaneProjectId || "");
       if (!linkId) return;
-      if (data.okr.rows.some((item) => String(item.rocketlaneProjectId || "") === linkId)) return;
+      if (data.okr.rows.some((item) => String(item.rocketlaneProjectId || "") === linkId && item.quarter === row.quarter)) return;
       data.okr.rows.push(JSON.parse(JSON.stringify(row)));
       changed = true;
     });
@@ -2949,7 +2949,7 @@
     let changed = false;
     (data.okr.rows || []).forEach((row) => {
       const projectId = String(row.rocketlaneProjectId || "");
-      const snap = phases[projectId] || phases[projectId.split("~")[0]];
+      const snap = phases[`${projectId}|${row.quarter}`] || phases[projectId] || phases[projectId.split("~")[0]];
       if (!projectId || !snap || !snap.phases) return;
       const project = data.projects.find(
         (item) => String(item.id) === projectId || String(item.id) === "rl-" + projectId
@@ -2978,6 +2978,44 @@
     return changed;
   }
 
+  function applyPublishedPortfolio(data) {
+    const snap = window.LOCAL_SNAPSHOT;
+    const replaceId = snap && snap.portfolioReplaceId;
+    if (!replaceId || !data || data.portfolioReplaceId === replaceId) return false;
+    data.projects = JSON.parse(JSON.stringify(snap.projects || []));
+    data.okr = JSON.parse(JSON.stringify(snap.okr || { quarter: "Q4 2026", userFilter: "__all__", rows: [] }));
+    data.portfolioReplaceId = replaceId;
+    data.portfolioSource = snap.portfolioSource || PORTFOLIO_SOURCE;
+    [
+      "timelinePortfolio2026",
+      "templateFlows2026",
+      "lentifulFlowCorrection",
+      "developmentSubtasks2026",
+      "projectPlanQuarters2026",
+      "phaseTimelineSpread2026",
+      "allocationPhaseQuarters2026",
+      "phaseDueQuarters2026",
+      "flowMonthHoursCleared2026",
+      "premiumMonthHours2026",
+      "fullYearMonthHours2026",
+      "okrManualEstimator2026",
+      "okrOwnerProjects2026",
+      "okrRocketlaneRefreshOct26",
+      "okrCihanFromEstimator2026",
+      "apparelMagicQuarters2026",
+      "rocketlanePortfolioOct19",
+      "onAirDirectPortfolio2026",
+      "createdProjects2026",
+      "johnPortfolio2026",
+      "pipelineCompliance2026",
+      "mcCompliance2026",
+      "onurTeamTasks2026",
+    ].forEach((key) => {
+      if (snap[key]) data[key] = snap[key];
+    });
+    return true;
+  }
+
   function load() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -2987,6 +3025,7 @@
         data.localTransferId = LOCAL_TRANSFER_ID;
       }
       if (!data) return null;
+      if (applyPublishedPortfolio(data)) publishedRocketlaneSyncChanged = true;
       if (!data.rates) data.rates = { ...DEFAULT_RATES };
       else data.rates = { ...DEFAULT_RATES, ...data.rates };
       // Migrate to Generic-base rates + Type hour multipliers
