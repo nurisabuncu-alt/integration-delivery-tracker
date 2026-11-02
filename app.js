@@ -604,6 +604,9 @@
   }
 
   const RL_KEY_STORAGE = "integration-delivery-rl-key";
+  const GH_DISPATCH_STORAGE = "integration-delivery-gh-dispatch";
+  const GH_REPO = "nurisabuncu-alt/integration-delivery-tracker";
+  const GH_WORKFLOW = "rocketlane-sync.yml";
   let rocketlaneSearchResults = [];
 
   function projectSource(p) {
@@ -3201,6 +3204,9 @@
     statSPWrap: document.getElementById("statSPWrap"),
     btnModeQuick: document.getElementById("btnModeQuick"),
     btnModeFull: document.getElementById("btnModeFull"),
+    btnCheckRocketlane: document.getElementById("btnCheckRocketlane"),
+    githubDispatchToken: document.getElementById("githubDispatchToken"),
+    rocketlaneCheckStatus: document.getElementById("rocketlaneCheckStatus"),
     statProjects: document.getElementById("statProjects"),
     statProjectsLabel: document.getElementById("statProjectsLabel"),
     statSP: document.getElementById("statSP"),
@@ -5760,6 +5766,105 @@
   els.userFilter.addEventListener("change", () => {
     state.userFilter = els.userFilter.value;
     render();
+  });
+
+  function githubHeaders(token) {
+    return {
+      Authorization: "Bearer " + token,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+    };
+  }
+
+  async function waitForRocketlaneRun(token, startedMs) {
+    const url = "https://api.github.com/repos/" + GH_REPO + "/actions/workflows/" + GH_WORKFLOW + "/runs?per_page=5";
+    for (let attempt = 0; attempt < 36; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 4000 : 20000));
+      const response = await fetch(url, { headers: githubHeaders(token), cache: "no-store" });
+      if (!response.ok) throw new Error("GitHub returned " + response.status + " while waiting.");
+      const payload = await response.json();
+      const runs = Array.isArray(payload.workflow_runs) ? payload.workflow_runs : [];
+      const run = runs.find(
+        (item) => item.event === "workflow_dispatch" && Date.parse(item.created_at) >= startedMs - 15000
+      );
+      if (run && run.status === "completed") return run;
+      els.rocketlaneCheckStatus.textContent = "Checking Rocketlane…";
+    }
+    throw new Error("The Rocketlane check is still running. Refresh in a few minutes.");
+  }
+
+  async function loadPublishedRocketlaneSync(token) {
+    const response = await fetch(
+      "https://api.github.com/repos/" + GH_REPO + "/contents/rocketlane-sync.js?ref=main",
+      { headers: Object.assign(githubHeaders(token), { Accept: "application/vnd.github.raw" }), cache: "no-store" }
+    );
+    if (!response.ok) throw new Error("Could not load the Rocketlane update.");
+    const text = await response.text();
+    const marker = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (marker < 0 || end < marker) throw new Error("The Rocketlane update was empty.");
+    window.ROCKETLANE_SYNC = JSON.parse(text.slice(marker, end + 1));
+  }
+
+  async function checkRocketlaneNow() {
+    const button = els.btnCheckRocketlane;
+    const status = els.rocketlaneCheckStatus;
+    const tokenInput = els.githubDispatchToken;
+    button.disabled = true;
+    const token = (tokenInput.value || localStorage.getItem(GH_DISPATCH_STORAGE) || "").trim();
+    if (!token) {
+      tokenInput.classList.remove("hidden");
+      status.textContent = "Paste a GitHub token that can start Actions. It stays in this browser.";
+      button.disabled = false;
+      tokenInput.focus();
+      return;
+    }
+    localStorage.setItem(GH_DISPATCH_STORAGE, token);
+    tokenInput.value = "";
+    tokenInput.classList.add("hidden");
+    status.textContent = "Checking Rocketlane…";
+    const startedMs = Date.now();
+    try {
+      const response = await fetch(
+        "https://api.github.com/repos/" + GH_REPO + "/actions/workflows/" + GH_WORKFLOW + "/dispatches",
+        {
+          method: "POST",
+          headers: Object.assign(githubHeaders(token), { "Content-Type": "application/json" }),
+          body: JSON.stringify({ ref: "main" }),
+        }
+      );
+      if (response.status === 401 || response.status === 403) {
+        localStorage.removeItem(GH_DISPATCH_STORAGE);
+        tokenInput.classList.remove("hidden");
+        status.textContent = "GitHub rejected that token. Paste a token that can start Actions.";
+        button.disabled = false;
+        tokenInput.focus();
+        return;
+      }
+      if (!response.ok && response.status !== 204) throw new Error("GitHub returned " + response.status + ".");
+      const run = await waitForRocketlaneRun(token, startedMs);
+      if (!run || run.conclusion !== "success") throw new Error("The Rocketlane check did not finish.");
+      const before = state.projects.length;
+      await loadPublishedRocketlaneSync(token);
+      const projectsChanged = addPublishedRocketlaneProjects(state);
+      const okrChanged = addPublishedRocketlaneOkrRows(state);
+      const phasesChanged = applyPublishedRocketlaneOkr(state);
+      if (projectsChanged || okrChanged || phasesChanged) save();
+      const added = state.projects.length - before;
+      render();
+      status.textContent = added
+        ? "Added " + added + (added === 1 ? " project." : " projects.")
+        : phasesChanged || okrChanged
+          ? "No new projects. Progress was refreshed."
+          : "No new projects.";
+    } catch (error) {
+      status.textContent = (error && error.message) || "Rocketlane check failed.";
+    }
+    button.disabled = false;
+  }
+
+  document.getElementById("btnCheckRocketlane").addEventListener("click", () => {
+    checkRocketlaneNow();
   });
 
   document.getElementById("btnAdd").addEventListener("click", () => {

@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=project-editor" />
+  <link rel="stylesheet" href="styles.css?v=check-rocketlane" />
 </head>
 <body>
   <div class="app">
@@ -46,6 +46,9 @@
           </select>
         </label>
         <button type="button" id="btnAdd" class="btn primary estimator-action">Add project</button>
+        <button type="button" id="btnCheckRocketlane" class="btn estimator-action">Check Rocketlane</button>
+        <input id="githubDispatchToken" class="github-token-input estimator-action hidden" type="password" autocomplete="off" placeholder="GitHub token" />
+        <span id="rocketlaneCheckStatus" class="table-sub estimator-action"></span>
         <button type="button" id="btnImport" class="btn estimator-action">Import RL CSV</button>
         <input id="importCsvInput" type="file" accept=".csv,text/csv" multiple hidden />
         <button type="button" id="btnExport" class="btn estimator-action">Export CSV</button>
@@ -322,6 +325,6 @@
   <script src="okr-progress-2026.js?v=rl-refresh-oct26"></script>
   <script src="local-snapshot.js?v=20261102T203906"></script>
   <script src="rocketlane-sync.js?v=20261102T203906"></script>
-  <script src="app.js?v=timeline-portfolio"></script>
+  <script src="app.js?v=check-rocketlane"></script>
 </body>
 </html>

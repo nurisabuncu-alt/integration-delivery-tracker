@@ -75,6 +75,16 @@ h1 {
   align-items: flex-end;
 }
 
+.github-token-input {
+  align-self: flex-end;
+  min-width: 11rem;
+}
+
+#rocketlaneCheckStatus {
+  align-self: center;
+  max-width: 16rem;
+}
+
 .period-label {
   display: flex;
   flex-direction: column;
