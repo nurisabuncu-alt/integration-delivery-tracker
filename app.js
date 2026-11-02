@@ -2282,6 +2282,63 @@
     return data;
   }
 
+  function latestOkrProgress(linkId) {
+    const parent = String(linkId || "").split("~")[0].replace(/^rl-/, "");
+    if (!parent) return null;
+    const candidates = [];
+    const file = window.OKR_PROGRESS_2026 && window.OKR_PROGRESS_2026[parent];
+    if (file && file.phases) candidates.push(file);
+    const syncPhases = window.ROCKETLANE_SYNC && window.ROCKETLANE_SYNC.okrPhases;
+    const synced = syncPhases && (syncPhases[String(linkId || "")] || syncPhases[parent]);
+    if (synced && synced.phases) candidates.push(synced);
+    candidates.sort((a, b) => String(a.syncedAt || "").localeCompare(String(b.syncedAt || "")));
+    return candidates.length ? candidates[candidates.length - 1] : null;
+  }
+
+  /** Replace Cihan's OKR rows with his Estimator projects and the Rocketlane progress for each. */
+  function applyCihanOkrFromEstimator(data) {
+    if (!data || data.okrCihanFromEstimator2026 || !Array.isArray(data.projects)) return data;
+    ensureOkrState(data);
+    const rates = data.rates || DEFAULT_RATES;
+    data.okr.rows = data.okr.rows.filter((row) => normalizeAssignee(row.owner) !== "Cihan");
+    data.projects.forEach((project) => {
+      if (normalizeAssignee(project.assignee) !== "Cihan") return;
+      if (project.status === "Cancelled" || project.complianceOnly) return;
+      const fromRocketlane = String(project.id || "").startsWith("rl-");
+      const fromEstimator = project.source === "manual";
+      if (!fromRocketlane && !fromEstimator) return;
+      const quarter = fromRocketlane
+        ? okrQuarterForOwnerProject(project, rates)
+        : quarterForManualOkr(project, rates, data.quarter || data.okr.quarter || "Q4 2026");
+      if (!quarter) return;
+      const linkId = String(project.id).replace(/^rl-/, "");
+      const snap = fromRocketlane ? latestOkrProgress(linkId) : null;
+      const taskCount = snap ? n(snap.taskCount) : 0;
+      data.okr.rows.push(
+        okrRow({
+          quarter,
+          objective: okrObjectiveForProject(project),
+          keyResult: project.name,
+          details: project.notes || "",
+          weight: 0,
+          projectType: okrProjectType(project),
+          owner: "Cihan",
+          rocketlaneProjectId: linkId,
+          phases: snap && snap.phases ? snap.phases : blankOkrPhases(),
+          syncSource: fromRocketlane
+            ? taskCount
+              ? "Rocketlane · " + taskCount + " tasks"
+              : "Rocketlane project"
+            : "Estimator project",
+          syncedAt: snap && snap.syncedAt ? snap.syncedAt : "",
+          syncName: true,
+        })
+      );
+    });
+    data.okrCihanFromEstimator2026 = true;
+    return data;
+  }
+
   /** Hours and phase dues end in Q3. The 2 Dec project due date is not a Q4 assignment. */
   function applyApparelMagicQuarters(data) {
     if (!data || data.apparelMagicQuarters2026 || !Array.isArray(data.projects)) return data;
@@ -3036,6 +3093,7 @@
       if (addPublishedRocketlaneOkrRows(data)) publishedRocketlaneSyncChanged = true;
       if (applyPublishedRocketlaneOkr(data)) publishedRocketlaneSyncChanged = true;
       applyApparelMagicQuarters(data);
+      applyCihanOkrFromEstimator(data);
       return data;
     } catch {
       return null;
@@ -3067,6 +3125,7 @@
   };
   applyOkrOwnerProjects(state);
   applyOkrManualEstimatorProjects(state);
+  applyCihanOkrFromEstimator(state);
   if (window.LOCAL_SNAPSHOT && state.localTransferId === LOCAL_TRANSFER_ID) {
     let storedTransferId = null;
     try {
