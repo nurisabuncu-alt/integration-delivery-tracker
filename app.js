@@ -1427,28 +1427,62 @@
     return [1, 2, 3, 4].map((q) => quarterId(year, q));
   }
 
+  // Statutory Turkish public holidays (Law 2429). Values are the share of a working day off.
+  // Fixed dates repeat every year. Ramazan and Kurban dates follow the Diyanet calendar.
+  const TR_FIXED_HOLIDAYS = {
+    "01-01": 1,
+    "04-23": 1,
+    "05-01": 1,
+    "05-19": 1,
+    "07-15": 1,
+    "08-30": 1,
+    "10-28": 0.5,
+    "10-29": 1,
+  };
+  const TR_RELIGIOUS_HOLIDAYS = {
+    2024: { "04-09": 0.5, "04-10": 1, "04-11": 1, "04-12": 1, "06-15": 0.5, "06-16": 1, "06-17": 1, "06-18": 1, "06-19": 1 },
+    2025: { "03-29": 0.5, "03-30": 1, "03-31": 1, "04-01": 1, "06-05": 0.5, "06-06": 1, "06-07": 1, "06-08": 1, "06-09": 1 },
+    2026: { "03-19": 0.5, "03-20": 1, "03-21": 1, "03-22": 1, "05-26": 0.5, "05-27": 1, "05-28": 1, "05-29": 1, "05-30": 1 },
+    2027: { "03-08": 0.5, "03-09": 1, "03-10": 1, "03-11": 1, "05-15": 0.5, "05-16": 1, "05-17": 1, "05-18": 1, "05-19": 1 },
+    2028: { "02-25": 0.5, "02-26": 1, "02-27": 1, "02-28": 1, "05-04": 0.5, "05-05": 1, "05-06": 1, "05-07": 1, "05-08": 1 },
+    2029: { "02-13": 0.5, "02-14": 1, "02-15": 1, "02-16": 1, "04-23": 0.5, "04-24": 1, "04-25": 1, "04-26": 1, "04-27": 1 },
+    2030: { "02-03": 0.5, "02-04": 1, "02-05": 1, "02-06": 1, "04-12": 0.5, "04-13": 1, "04-14": 1, "04-15": 1, "04-16": 1 },
+    2031: { "01-23": 0.5, "01-24": 1, "01-25": 1, "01-26": 1, "04-01": 0.5, "04-02": 1, "04-03": 1, "04-04": 1, "04-05": 1 },
+    2032: { "01-13": 0.5, "01-14": 1, "01-15": 1, "01-16": 1, "03-21": 0.5, "03-22": 1, "03-23": 1, "03-24": 1, "03-25": 1 },
+    2033: { "01-01": 0.5, "01-02": 1, "01-03": 1, "01-04": 1, "03-10": 0.5, "03-11": 1, "03-12": 1, "03-13": 1, "03-14": 1, "12-22": 0.5, "12-23": 1, "12-24": 1, "12-25": 1 },
+    2034: { "02-28": 0.5, "03-01": 1, "03-02": 1, "03-03": 1, "03-04": 1, "12-11": 0.5, "12-12": 1, "12-13": 1, "12-14": 1 },
+    2035: { "02-17": 0.5, "02-18": 1, "02-19": 1, "02-20": 1, "02-21": 1, "11-30": 0.5, "12-01": 1, "12-02": 1, "12-03": 1 },
+  };
+
+  function holidayDayKey(month, day) {
+    return String(month).padStart(2, "0") + "-" + String(day).padStart(2, "0");
+  }
+
+  function turkishHolidayFraction(year, month, day) {
+    const key = holidayDayKey(month, day);
+    const fixed = TR_FIXED_HOLIDAYS[key] || 0;
+    const religious = (TR_RELIGIOUS_HOLIDAYS[year] && TR_RELIGIOUS_HOLIDAYS[year][key]) || 0;
+    return Math.max(fixed, religious);
+  }
+
+  function workingDaysBetween(start, end) {
+    let days = 0;
+    for (const date = new Date(start); date < end; date.setDate(date.getDate() + 1)) {
+      const weekday = date.getDay();
+      if (weekday === 0 || weekday === 6) continue;
+      days += 1 - turkishHolidayFraction(date.getFullYear(), date.getMonth() + 1, date.getDate());
+    }
+    return days;
+  }
+
   function weekdaysInQuarter(qStr) {
     const { q, year } = parseQuarter(qStr);
     const startMonth = (q - 1) * 3;
-    const start = new Date(year, startMonth, 1);
-    const end = new Date(year, startMonth + 3, 1);
-    let weekdays = 0;
-    for (const d = new Date(start); d < end; d.setDate(d.getDate() + 1)) {
-      const day = d.getDay();
-      if (day !== 0 && day !== 6) weekdays += 1;
-    }
-    return weekdays;
+    return workingDaysBetween(new Date(year, startMonth, 1), new Date(year, startMonth + 3, 1));
   }
 
   function weekdaysInMonth(year, month) {
-    const start = new Date(year, month - 1, 1);
-    const end = new Date(year, month, 1);
-    let weekdays = 0;
-    for (const d = new Date(start); d < end; d.setDate(d.getDate() + 1)) {
-      const day = d.getDay();
-      if (day !== 0 && day !== 6) weekdays += 1;
-    }
-    return weekdays;
+    return workingDaysBetween(new Date(year, month - 1, 1), new Date(year, month, 1));
   }
 
   function monthShareOfQuarter(qStr, month) {
@@ -3462,12 +3496,34 @@
       .join("");
   }
 
+  const calcCache = new Map();
+
+  function clearCalcCache(projectId) {
+    if (!projectId) {
+      calcCache.clear();
+      return;
+    }
+    const prefix = projectId + "\n";
+    for (const key of calcCache.keys()) {
+      if (key.startsWith(prefix)) calcCache.delete(key);
+    }
+  }
+
+  function calcCached(p, quarter, month) {
+    const key = p.id + "\n" + quarter + "\n" + (month || 0);
+    const hit = calcCache.get(key);
+    if (hit) return hit;
+    const value = calcForQuarter(p, state.rates, quarter, month || 0);
+    calcCache.set(key, value);
+    return value;
+  }
+
   function computeAll() {
     return state.projects.filter((p) => !p.complianceOnly).map((p) => {
       ensurePhaseQuarters(p, state.quarter);
       return {
         p,
-        c: calcForQuarter(p, state.rates, state.quarter, selectedMonth()),
+        c: calcCached(p, state.quarter, selectedMonth()),
         assignee: normalizeAssignee(p.assignee),
       };
     });
@@ -3513,7 +3569,7 @@
       .filter((p) => !p.complianceOnly)
       .map((p) => ({
         p,
-        c: calcForQuarter(p, state.rates, quarter, month),
+        c: calcCached(p, quarter, month),
         assignee: normalizeAssignee(p.assignee),
       }))
       .filter(
@@ -3524,31 +3580,41 @@
       );
   }
 
-  function renderDashboard(filter) {
+  function renderDashboard(filter, computedRows) {
     const users = reportUsers(filter);
     const personCapacity = selectedMonth()
       ? weekdaysInMonth(state.year, selectedMonth()) * 6
       : capacityHoursForQuarter(state.quarter);
-    const selectedRows = rowsForQuarter(state.quarter, filter);
+    const rowsForCurrent = (user) =>
+      computedRows
+        ? computedRows.filter(
+            (row) =>
+              row.p.status !== "Cancelled" &&
+              row.c.hasWorkInQuarter &&
+              (user === "__all__" || row.assignee === user)
+          )
+        : rowsForQuarter(state.quarter, user);
+    const selectedRows = rowsForCurrent(filter);
     const totalHours = selectedRows.reduce((sum, row) => sum + row.c.quarterHours, 0);
     const totalCapacity = users.length * personCapacity;
     const utilization = totalCapacity > 0 ? totalHours / totalCapacity : 0;
 
     els.statCapacity.textContent = `${fmt(totalCapacity, 0)} h`;
-    els.statCapacityNote.textContent = `${selectedMonth() ? weekdaysInMonth(state.year, selectedMonth()) : weekdaysInQuarter(state.quarter)} weekdays × 6 h × ${users.length} ${users.length === 1 ? "person" : "people"}`;
+    const workingDays = selectedMonth()
+      ? weekdaysInMonth(state.year, selectedMonth())
+      : weekdaysInQuarter(state.quarter);
+    const workingDayLabel = Number.isInteger(workingDays) ? String(workingDays) : workingDays.toFixed(1);
+    els.statCapacityNote.textContent = `${workingDayLabel} working days × 6 h × ${users.length} ${users.length === 1 ? "person" : "people"}. Turkish public holidays removed.`;
     els.statUtilization.textContent = `${(utilization * 100).toFixed(1)}%`;
     els.statUtilization.className =
       "stat-value " + (utilization > 1 ? "metric-danger" : utilization >= 0.85 ? "metric-warn" : "metric-good");
     els.capacityQuarterLabel.textContent = periodName();
 
     const userRows = users.map((user) => {
-      const hours = rowsForQuarter(state.quarter, user).reduce(
-        (sum, row) => sum + row.c.quarterHours,
-        0
-      );
+      const hours = rowsForCurrent(user).reduce((sum, row) => sum + row.c.quarterHours, 0);
       return { user, hours, pct: personCapacity > 0 ? hours / personCapacity : 0 };
     });
-    const unassignedHours = rowsForQuarter(state.quarter, "Unassigned").reduce(
+    const unassignedHours = rowsForCurrent("Unassigned").reduce(
       (sum, row) => sum + row.c.quarterHours,
       0
     );
@@ -3580,10 +3646,19 @@
         .join("") || '<p class="empty-state">No capacity available for this filter.</p>';
 
     const quarterData = quartersForYear(state.year).map((quarter) => {
-      const hours = rowsForQuarter(quarter, filter, true).reduce(
-        (sum, row) => sum + row.c.quarterHours,
-        0
-      );
+      let hours = 0;
+      if (computedRows && estimatorView && estimatorView.perProjectQuarter) {
+        estimatorView.perProjectQuarter.forEach((entry) => {
+          if (entry.status === "Cancelled") return;
+          if (filter !== "__all__" && entry.assignee !== filter) return;
+          hours += entry.hours[quarter] || 0;
+        });
+      } else {
+        hours = rowsForQuarter(quarter, filter, true).reduce(
+          (sum, row) => sum + row.c.quarterHours,
+          0
+        );
+      }
       const capacity = reportUsers(filter).length * capacityHoursForQuarter(quarter);
       return { quarter, hours, capacity, pct: capacity > 0 ? hours / capacity : 0 };
     });
@@ -3736,15 +3811,15 @@
     const weeksCell = directHours
       ? `<td class="mono num">—</td>`
       : `<td class="col-narrow"><input data-f="weeks" type="number" min="0" step="1" value="${p.weeks == null || p.weeks === "" ? "" : n(p.weeks)}" title="Project length in weeks. Meetings on the flow hours = (weeks − 2) × 0.5 h weekly calls + 1 h kickoff. Blank keeps the 20% overhead. Entered month hours are not marked up." /></td>`;
-    const quarterTotalHours = calcForQuarter(p, state.rates, state.quarter, null).quarterHours;
+    const quarterTotalHours = calcCached(p, state.quarter, 0).quarterHours;
     const okrShare = p.status === "Cancelled" ? null : okrHoursWeight(quarterTotalHours, state.quarter);
     const quarterCapacity = capacityHoursForQuarter(state.quarter);
-    const okrCell = `<td class="mono num" title="${escapeAttr(
+    const okrCell = `<td class="mono num" data-calc="okr" title="${escapeAttr(
       okrShare == null
         ? "No allocated hours in this quarter"
         : `${fmt(quarterTotalHours, 1)} allocated hours of ${fmt(quarterCapacity, 0)} quarter hours`
     )}">${okrShare == null ? "—" : okrShare.toFixed(1) + "%"}</td>`;
-    const quarterTotal = `<td class="mono num" title="Flow hours in this quarter plus entered month hours">${fmt(quarterTotalHours, 1)}</td>`;
+    const quarterTotal = `<td class="mono num" data-calc="q-total" title="Flow hours in this quarter plus entered month hours">${fmt(quarterTotalHours, 1)}</td>`;
     const monthCells = otherMonthCells(p);
     if (isQuick()) {
       const flowCells = directHours
@@ -3763,8 +3838,8 @@
         <td class="col-narrow"><input data-f="erpCutover" type="checkbox" ${p.erpCutover ? "checked" : ""} title="ERP go-live hours" /></td>
         ${weeksCell}
         ${quarterTotal}
-        <td class="mono num">${(userPct * 100).toFixed(1)}%</td>
-        <td class="mono num">${(teamPct * 100).toFixed(1)}%</td>
+        <td class="mono num" data-calc="user-pct">${(userPct * 100).toFixed(1)}%</td>
+        <td class="mono num" data-calc="team-pct">${(teamPct * 100).toFixed(1)}%</td>
         ${okrCell}
         <td><button type="button" class="btn danger" data-del="${escapeAttr(p.id)}" title="Remove">✕</button></td>
       </tr>`;
@@ -3791,11 +3866,11 @@
       <td class="col-narrow"><input data-f="erpCutover" type="checkbox" ${p.erpCutover ? "checked" : ""} /></td>
       ${weeksCell}
       ${quarterTotal}
-      <td class="mono num" title="Full lifecycle SP">${fmt(c.totalSP, 0)}</td>
-      <td class="mono num" title="SP attributed to ${escapeAttr(periodName())}">${fmt(c.quarterSP, 1)}</td>
-      <td class="mono num">${fmt(c.quarterHours, 1)}</td>
-      <td class="mono num" title="Share of this user's quarter hours">${(userPct * 100).toFixed(1)}%</td>
-      <td class="mono num" title="Share of team quarter hours">${(teamPct * 100).toFixed(1)}%</td>
+      <td class="mono num" data-calc="total-sp" title="Full lifecycle SP">${fmt(c.totalSP, 0)}</td>
+      <td class="mono num" data-calc="period-sp" title="SP attributed to ${escapeAttr(periodName())}">${fmt(c.quarterSP, 1)}</td>
+      <td class="mono num" data-calc="period-hours">${fmt(c.quarterHours, 1)}</td>
+      <td class="mono num" data-calc="user-pct" title="Share of this user's quarter hours">${(userPct * 100).toFixed(1)}%</td>
+      <td class="mono num" data-calc="team-pct" title="Share of team quarter hours">${(teamPct * 100).toFixed(1)}%</td>
       ${okrCell}
       <td><button type="button" class="btn danger" data-del="${escapeAttr(p.id)}" title="Remove">✕</button></td>
     </tr>`;
@@ -3817,14 +3892,14 @@
         <th>Project</th><th>Assignee</th><th>Type</th><th>Status</th>
         <th class="flow-count" title="Standard flows">Std<span class="th-sub">flows</span></th><th class="flow-count" title="Complex flows">Cpx<span class="th-sub">flows</span></th>
         ${monthHeads}<th>Dependency</th><th>ERP</th><th>Weeks</th>
-        <th title="Flow hours in this quarter plus entered month hours">${quarterTotalHead}</th><th>User %</th><th>Team %</th><th title="Allocated quarter hours ÷ one person's quarter capacity (weekdays × 6 h)">OKR</th><th></th>
+        <th title="Flow hours in this quarter plus entered month hours">${quarterTotalHead}</th><th>User %</th><th>Team %</th><th title="Allocated quarter hours ÷ one person's quarter capacity (weekdays × 6 h, excluding Turkish public holidays)">OKR</th><th></th>
       </tr></thead>`;
     }
     return `<thead><tr>
       <th>Project</th><th>Assignee</th><th>Type</th><th>Status</th><th>Category</th><th>Effort</th>
       <th class="flow-count" title="Standard flows">Std<span class="th-sub">flows</span></th><th class="flow-count" title="Complex flows">Cpx<span class="th-sub">flows</span></th><th class="flow-count" title="Insane flows">Ins<span class="th-sub">flows</span></th>
       ${monthHeads}<th>Dependency</th><th>Mapping</th><th>Connection</th>
-      <th>ERP</th><th>Weeks</th><th title="Flow hours in this quarter plus entered month hours">${quarterTotalHead}</th><th>Total SP</th><th>${spHead}</th><th>${periodHead}</th><th>User %</th><th>Team %</th><th title="Allocated quarter hours ÷ one person's quarter capacity (weekdays × 6 h)">OKR</th><th></th>
+      <th>ERP</th><th>Weeks</th><th title="Flow hours in this quarter plus entered month hours">${quarterTotalHead}</th><th>Total SP</th><th>${spHead}</th><th>${periodHead}</th><th>User %</th><th>Team %</th><th title="Allocated quarter hours ÷ one person's quarter capacity (weekdays × 6 h, excluding Turkish public holidays)">OKR</th><th></th>
     </tr></thead>`;
   }
 
@@ -4012,7 +4087,7 @@
     const singleOwner = (state.okr.userFilter || "__all__") !== "__all__";
     els.okrTotalWeight.classList.toggle("okr-weight-warning", singleOwner && totalWeight > 100.05);
     els.okrTotalWeight.title =
-      "Each linked key result is that project's allocated quarter hours divided by one person's quarter capacity (weekdays × 6 h). The total does not have to be 100%. Manual rows keep the weight you type.";
+      "Each linked key result is that project's allocated quarter hours divided by one person's quarter capacity (weekdays × 6 h, excluding Turkish public holidays). The total does not have to be 100%. Manual rows keep the weight you type.";
     els.okrOnTrack.textContent = String(
       confidences.filter((value) => value === "On track" || value === "Complete").length
     );
@@ -4061,7 +4136,7 @@
       <th class="okr-objective">Objective</th>
       <th class="okr-key-result">Key Result</th>
       <th class="okr-number" title="Average of phases assigned to this quarter, unless you enter a value">Achievement</th>
-      <th class="okr-number" title="Linked projects: allocated quarter hours ÷ quarter capacity (weekdays × 6 h). Manual rows: the weight you type.">Weight</th>
+      <th class="okr-number" title="Linked projects: allocated quarter hours ÷ quarter capacity (weekdays × 6 h, excluding Turkish public holidays). Manual rows: the weight you type.">Weight</th>
       <th class="okr-number" title="min(Achievement ÷ Goal, 1) × Weight">Result</th>
       <th class="okr-details">Details</th>
       <th class="okr-owner">Owner</th>
@@ -4239,8 +4314,270 @@
     els.reportQuarterLabel.textContent = periodName();
   }
 
+  let estimatorView = null;
+  let configDrawn = false;
+  let saveTimer = 0;
+  let fullRenderQueued = false;
+  let patchFrame = 0;
+  let patchJob = null;
+  let detailPreserve = null;
+
+  function indexQuarterHours(computed) {
+    const map = new Map();
+    const quarters = quartersForYear(state.year);
+    computed.forEach((row) => {
+      const hours = {};
+      quarters.forEach((quarter) => {
+        const result = calcCached(row.p, quarter, 0);
+        hours[quarter] =
+          row.p.status === "Cancelled" || !result.hasWorkInQuarter ? 0 : result.quarterHours;
+      });
+      map.set(row.p.id, { assignee: row.assignee, status: row.p.status, hours });
+    });
+    return map;
+  }
+
+  function scheduleSave() {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      saveTimer = 0;
+      save();
+    }, 350);
+  }
+
+  function flushSave() {
+    if (!saveTimer) return;
+    clearTimeout(saveTimer);
+    saveTimer = 0;
+    save();
+  }
+
+  window.addEventListener("pagehide", flushSave);
+
+  function scheduleFullRender() {
+    patchJob = null;
+    if (fullRenderQueued) return;
+    fullRenderQueued = true;
+    requestAnimationFrame(() => {
+      fullRenderQueued = false;
+      render();
+    });
+  }
+
+  function queuePatch(p, source) {
+    if (fullRenderQueued) return;
+    patchJob = { p, source };
+    if (patchFrame) return;
+    patchFrame = requestAnimationFrame(() => {
+      patchFrame = 0;
+      const job = patchJob;
+      patchJob = null;
+      if (!job || fullRenderQueued) return;
+      refreshEditedProject(job.p, job.source);
+    });
+  }
+
+  function viewIsCurrent() {
+    return !!(
+      estimatorView &&
+      estimatorView.quarter === state.quarter &&
+      estimatorView.month === (selectedMonth() || 0) &&
+      estimatorView.year === state.year &&
+      estimatorView.mode === state.uiMode &&
+      estimatorView.filter === (state.userFilter || "__all__")
+    );
+  }
+
+  function rowListed(p, c) {
+    return (
+      p.status !== "Cancelled" &&
+      (c.hasWorkInQuarter ||
+        ((p.source === "manual" || p.portfolioShare) && phaseAssignedToQuarter(p, state.quarter)))
+    );
+  }
+
+  function weightMaps(computed) {
+    const teamActive = computed.filter((x) => x.p.status !== "Cancelled" && x.c.hasWorkInQuarter);
+    const byUser = new Map();
+    teamActive.forEach((row) => {
+      byUser.set(row.assignee, (byUser.get(row.assignee) || 0) + row.c.quarterHours);
+    });
+    return {
+      team: teamActive.reduce((sum, row) => sum + row.c.quarterHours, 0),
+      teamSP: teamActive.reduce((sum, row) => sum + row.c.quarterSP, 0),
+      teamActive,
+      byUser,
+    };
+  }
+
+  function setCalcCell(tr, name, text, title) {
+    const el = tr.querySelector(`[data-calc="${name}"]`);
+    if (!el) return;
+    if (el.textContent !== text) el.textContent = text;
+    if (title != null && el.title !== title) el.title = title;
+  }
+
+  function paintRowCalcs(tr, row, team, userHours) {
+    const { p, c } = row;
+    const full = calcCached(p, state.quarter, 0);
+    const quarterTotalHours = p.status === "Cancelled" || !full.hasWorkInQuarter ? 0 : full.quarterHours;
+    const userPct = userHours > 0 && p.status !== "Cancelled" ? c.quarterHours / userHours : 0;
+    const teamPct = team > 0 && p.status !== "Cancelled" ? c.quarterHours / team : 0;
+    const okrShare = p.status === "Cancelled" ? null : okrHoursWeight(quarterTotalHours, state.quarter);
+    const capacity = capacityHoursForQuarter(state.quarter);
+    setCalcCell(tr, "q-total", fmt(quarterTotalHours, 1));
+    setCalcCell(tr, "user-pct", (userPct * 100).toFixed(1) + "%");
+    setCalcCell(tr, "team-pct", (teamPct * 100).toFixed(1) + "%");
+    setCalcCell(
+      tr,
+      "okr",
+      okrShare == null ? "—" : okrShare.toFixed(1) + "%",
+      okrShare == null
+        ? "No allocated hours in this quarter"
+        : `${fmt(quarterTotalHours, 1)} allocated hours of ${fmt(capacity, 0)} quarter hours`
+    );
+    setCalcCell(tr, "total-sp", fmt(c.totalSP, 0));
+    setCalcCell(tr, "period-sp", fmt(c.quarterSP, 1));
+    setCalcCell(tr, "period-hours", fmt(c.quarterHours, 1));
+    tr.classList.toggle("selected", p.id === state.selectedId);
+    tr.classList.toggle("row-inactive", !c.hasWorkInQuarter && p.status !== "Cancelled");
+    tr.classList.toggle("cancelled", p.status === "Cancelled");
+  }
+
+  function paintSummary(weights) {
+    const filter = state.userFilter || "__all__";
+    const visibleGroups =
+      filter === "__all__" ? estimatorView.groups : estimatorView.groups.filter((g) => g.user === filter);
+    const visibleActive = visibleGroups
+      .flatMap((g) => g.rows)
+      .filter((x) => x.p.status !== "Cancelled" && x.c.hasWorkInQuarter);
+    const useAll = filter === "__all__";
+    const activeRows = useAll ? weights.teamActive : visibleActive;
+    els.statProjects.textContent = String(activeRows.length);
+    els.statSP.textContent = fmt(
+      useAll ? weights.teamSP : visibleActive.reduce((sum, row) => sum + row.c.quarterSP, 0),
+      1
+    );
+    els.statHours.textContent = fmt(
+      useAll ? weights.team : visibleActive.reduce((sum, row) => sum + row.c.quarterHours, 0),
+      1
+    );
+    els.statActive.textContent = String(new Set(activeRows.map((row) => row.assignee)).size);
+    estimatorView.groups.forEach((g) => {
+      const totals = userTotals(g.rows);
+      const teamText = (weights.team > 0 ? (totals.weight / weights.team) * 100 : 0).toFixed(1) + "%";
+      const section = els.sections.querySelector(`[data-user-section="${CSS.escape(g.user)}"]`);
+      if (section) {
+        const setChip = (name, text) => {
+          const el = section.querySelector(`[data-chip="${name}"]`);
+          if (el && el.textContent !== text) el.textContent = text;
+        };
+        setChip("projects", String(totals.projects));
+        setChip("sp", fmt(totals.sp, 1));
+        setChip("hours", fmt(totals.hours, 1));
+        setChip("team", teamText);
+      }
+      const card = els.userReport.querySelector(`[data-user="${CSS.escape(g.user)}"]`);
+      if (!card || totals.projects <= 0) return;
+      const setReport = (name, text) => {
+        const el = card.querySelector(`[data-report="${name}"]`);
+        if (el && el.textContent !== text) el.textContent = text;
+      };
+      setReport("projects", String(totals.projects));
+      setReport("sp", fmt(totals.sp, 1));
+      setReport("hours", fmt(totals.hours, 1));
+      setReport("team", teamText);
+    });
+  }
+
+  function mirrorControl(p, source) {
+    if (!source) return;
+    const monthKey = source.getAttribute("data-mhours");
+    const field = source.getAttribute("data-f");
+    if (!monthKey && !field) return;
+    const selector = monthKey
+      ? `[data-mhours="${CSS.escape(monthKey)}"]`
+      : `[data-f="${CSS.escape(field)}"]`;
+    [els.sections.querySelector(`tr[data-id="${CSS.escape(p.id)}"]`), els.projectEditor].forEach((root) => {
+      if (!root) return;
+      const el = root.querySelector(selector);
+      if (!el || el === source) return;
+      if (el.type === "checkbox") el.checked = !!source.checked;
+      else if (el.value !== source.value) el.value = source.value;
+    });
+  }
+
+  function refreshEditedProject(p, source) {
+    if (!viewIsCurrent()) {
+      render();
+      return;
+    }
+    clearCalcCache(p.id);
+    const row = estimatorView.computed.find((item) => item.p.id === p.id);
+    if (!row) {
+      render();
+      return;
+    }
+    row.c = calcCached(p, state.quarter, selectedMonth());
+    row.assignee = normalizeAssignee(p.assignee);
+    const tr = els.sections.querySelector(`tr[data-id="${CSS.escape(p.id)}"]`);
+    if (!tr || !rowListed(p, row.c)) {
+      render();
+      return;
+    }
+    const shown = estimatorView.groups
+      .filter((g) => userTotals(g.rows).projects > 0)
+      .map((g) => g.user)
+      .join("|");
+    const cards = [...els.userReport.querySelectorAll("[data-user]")]
+      .map((el) => el.getAttribute("data-user"))
+      .join("|");
+    if (shown !== cards) {
+      render();
+      return;
+    }
+    if (source && source.getAttribute("data-mhours") && usesCalculatedPhases(p) && p.source !== "manual") {
+      source.value = "";
+    }
+    mirrorControl(p, source);
+    const hours = {};
+    quartersForYear(state.year).forEach((quarter) => {
+      const result = calcCached(p, quarter, 0);
+      hours[quarter] = p.status === "Cancelled" || !result.hasWorkInQuarter ? 0 : result.quarterHours;
+    });
+    estimatorView.perProjectQuarter.set(p.id, { assignee: row.assignee, status: p.status, hours });
+    const weights = weightMaps(estimatorView.computed);
+    els.sections.querySelectorAll("tr[data-id]").forEach((rowEl) => {
+      const item = estimatorView.computed.find((entry) => entry.p.id === rowEl.getAttribute("data-id"));
+      if (!item) return;
+      paintRowCalcs(rowEl, item, weights.team, weights.byUser.get(item.assignee) || 0);
+    });
+    paintSummary(weights);
+    renderDashboard(estimatorView.filter, estimatorView.computed);
+    const active = document.activeElement;
+    detailPreserve = {
+      skipEditor: els.projectEditor.contains(active),
+      skipPhaseForm: els.phaseQuarterForm.contains(active),
+      skipQuick: els.quickFocusForm.contains(active),
+    };
+    renderDetail(estimatorView.computed, weights.team);
+    detailPreserve = null;
+    scheduleSave();
+  }
+
+  function afterProjectEdit(p, source) {
+    state.selectedId = p.id;
+    const field = source.getAttribute("data-f");
+    if (field === "assignee" || field === "type" || field === "status" || state.uiTab !== "estimator") {
+      scheduleFullRender();
+      return;
+    }
+    queuePatch(p, source);
+  }
+
   function render() {
     const focus = captureFocus();
+    clearCalcCache();
     applyModeChrome();
     applyTabChrome();
     fillQuarterSelect();
@@ -4253,6 +4590,16 @@
     const teamSP = teamActive.reduce((s, x) => s + x.c.quarterSP, 0);
 
     const filter = state.userFilter || "__all__";
+    estimatorView = {
+      quarter: state.quarter,
+      month: selectedMonth() || 0,
+      year: state.year,
+      mode: state.uiMode,
+      filter,
+      computed,
+      groups,
+      perProjectQuarter: indexQuarterHours(computed),
+    };
     const visibleGroups =
       filter === "__all__" ? groups : groups.filter((g) => g.user === filter);
 
@@ -4283,7 +4630,7 @@
       els.statActive.textContent = String(new Set(teamActive.map((x) => x.assignee)).size);
     }
 
-    renderDashboard(filter);
+    renderDashboard(filter, computed);
 
     const usersInData = groups.map((g) => g.user);
     els.userFilter.innerHTML =
@@ -4303,10 +4650,10 @@
         return `<article class="user-card${filter === g.user ? " active" : ""}" data-user="${escapeAttr(g.user)}">
           <h3>${escapeHtml(g.user)}</h3>
           <div class="meta">
-            <div>Projects<strong>${t.projects}</strong></div>
-            <div>Q SP<strong>${fmt(t.sp, 1)}</strong></div>
-            <div>Q Hours<strong>${fmt(t.hours, 1)}</strong></div>
-            <div>Q Team %<strong>${(teamShare * 100).toFixed(1)}%</strong></div>
+            <div>Projects<strong data-report="projects">${t.projects}</strong></div>
+            <div>Q SP<strong data-report="sp">${fmt(t.sp, 1)}</strong></div>
+            <div>Q Hours<strong data-report="hours">${fmt(t.hours, 1)}</strong></div>
+            <div>Q Team %<strong data-report="team">${(teamShare * 100).toFixed(1)}%</strong></div>
           </div>
         </article>`;
       })
@@ -4329,10 +4676,10 @@
           <div class="user-section-head">
             <h3>${escapeHtml(g.user)} <span class="badge">${escapeHtml(periodName())}</span></h3>
             <div class="chips">
-              <span>Active <strong>${t.projects}</strong></span>
-              <span>Q SP <strong>${fmt(t.sp, 1)}</strong></span>
-              <span>Q Hours <strong>${fmt(t.hours, 1)}</strong></span>
-              <span>Q Team % <strong>${teamHoursWeight > 0 ? ((t.weight / teamHoursWeight) * 100).toFixed(1) : "0.0"}%</strong></span>
+              <span>Active <strong data-chip="projects">${t.projects}</strong></span>
+              <span>Q SP <strong data-chip="sp">${fmt(t.sp, 1)}</strong></span>
+              <span>Q Hours <strong data-chip="hours">${fmt(t.hours, 1)}</strong></span>
+              <span>Q Team % <strong data-chip="team">${teamHoursWeight > 0 ? ((t.weight / teamHoursWeight) * 100).toFixed(1) : "0.0"}%</strong></span>
             </div>
           </div>
           <div class="table-wrap">
@@ -4348,10 +4695,13 @@
     }
 
     renderDetail(computed, teamHoursWeight);
-    renderConfig();
-    renderCompliance();
-    renderOkr();
-    save();
+    if (!configDrawn) {
+      renderConfig();
+      configDrawn = true;
+    }
+    if (state.uiTab === "compliance") renderCompliance();
+    if (state.uiTab === "okr") renderOkr();
+    scheduleSave();
     restoreFocus(focus);
   }
 
@@ -4392,6 +4742,12 @@
       <label class="span-2">Notes<textarea data-f="notes">${escapeHtml(p.notes || "")}</textarea></label>`;
   }
 
+  function writePhaseForm(className, html) {
+    if (detailPreserve && detailPreserve.skipPhaseForm) return;
+    els.phaseQuarterForm.className = className;
+    els.phaseQuarterForm.innerHTML = html;
+  }
+
   function renderDetail(computed, teamHoursWeight) {
     const row = computed.find((x) => x.p.id === state.selectedId) || computed[0];
     if (!row) {
@@ -4409,13 +4765,14 @@
     state.selectedId = row.p.id;
     const { p, c } = row;
     ensurePhaseQuarters(p, state.quarter);
-    renderProjectEditor(p);
+    if (!(detailPreserve && detailPreserve.skipEditor)) renderProjectEditor(p);
     const teamPct =
       teamHoursWeight > 0 && p.status !== "Cancelled" ? c.quarterHours / teamHoursWeight : 0;
 
     els.detailTitle.textContent = `${p.name} · ${normalizeAssignee(p.assignee)} · ${periodName()}: ${fmt(c.quarterHours, 1)} h (${(teamPct * 100).toFixed(1)}% team)${isQuick() ? "" : ` · SP ${fmt(c.totalSP, 0)} / period SP ${fmt(c.quarterSP, 1)}`}`;
 
     // Quick: quarter focus preset. Other hours are entered per quarter instead.
+    if (!(detailPreserve && detailPreserve.skipQuick)) {
     els.quickFocusForm.className =
       p.useActualByQuarter ||
       isDirectHoursType(p.type) ||
@@ -4433,13 +4790,15 @@
     <label>Anchor quarter for focus
       <select data-focus="anchorQ">${optionList(allQuarterOptions(state.year), state.quarter)}</select>
     </label>`;
+    }
 
     if (isQuarterHoursType(p.type) || (isDirectHoursType(p.type) && !p.useActualByQuarter)) {
       const yearQuarters = quartersForYear(state.year);
       const byMonth = ensureHoursByMonth(p);
       const tracked = isDirectHoursType(p.type);
-      els.phaseQuarterForm.className = "phase-quarter-form month-board";
-      els.phaseQuarterForm.innerHTML = yearQuarters
+      writePhaseForm(
+        "phase-quarter-form month-board",
+        yearQuarters
         .map((quarter) => {
           const months = monthsInQuarter(quarter);
           const selected = quarter === state.quarter ? " is-selected" : "";
@@ -4456,7 +4815,8 @@
               .join("")}
           </section>`;
         })
-        .join("");
+        .join("")
+      );
       const enteredPeriod = enteredMonthHours(p, state.quarter, selectedMonth());
       const flowPeriod = hasFlowEstimate(p) ? c.quarterHours - enteredPeriod : 0;
       const flowCards = hasFlowEstimate(p)
@@ -4476,8 +4836,7 @@
     }
 
     if (isQuick()) {
-      els.phaseQuarterForm.className = "phase-quarter-form hidden-mode";
-      els.phaseQuarterForm.innerHTML = "";
+      writePhaseForm("phase-quarter-form hidden-mode", "");
       els.phaseDetail.className = "phase-grid";
       els.phaseDetail.innerHTML = `
         <div class="phase-card in-quarter"><span class="label">Q hours</span><span class="value">${fmt(c.quarterHours, 1)} h</span></div>
@@ -4488,8 +4847,7 @@
     }
 
     if (p.useActualByQuarter) {
-      els.phaseQuarterForm.className = "phase-quarter-form hidden-mode";
-      els.phaseQuarterForm.innerHTML = "";
+      writePhaseForm("phase-quarter-form hidden-mode", "");
       els.phaseDetail.className = "phase-grid";
       els.phaseDetail.innerHTML = `
         <div class="phase-card in-quarter"><span class="label">${escapeHtml(state.quarter)} dated hours</span><span class="value">${fmt(c.quarterHours, 1)} h</span></div>
@@ -4499,14 +4857,16 @@
     }
 
     const qOpts = allQuarterOptions(state.year);
-    els.phaseQuarterForm.className = "phase-quarter-form";
-    els.phaseQuarterForm.innerHTML = PHASE_KEYS.map((k) => {
+    writePhaseForm(
+      "phase-quarter-form",
+      PHASE_KEYS.map((k) => {
       const on = isPhaseActive(p, k);
       return `<label${on ? "" : ' class="phase-off"'}>
         <span class="phase-toggle"><input type="checkbox" data-phase-on="${k}"${on ? " checked" : ""} /> ${PHASE_LABELS[k]}</span>
         <select data-phase-q="${k}"${on ? "" : " disabled"}>${optionList(qOpts, p.phaseQuarters[k])}</select>
       </label>`;
-    }).join("");
+    }).join("")
+    );
 
     els.phaseDetail.className = "phase-grid";
     const cards = PHASE_KEYS.map((k) => {
@@ -4608,8 +4968,7 @@
     const id = tr.getAttribute("data-id");
     const p = state.projects.find((x) => x.id === id);
     if (!p || !applyProjectField(p, e.target)) return;
-    state.selectedId = id;
-    requestAnimationFrame(() => render());
+    afterProjectEdit(p, e.target);
   }
 
   function onQuarterHourInput(e) {
@@ -4625,13 +4984,13 @@
         delete ensureHoursByMonth(p)[item.key];
       });
     }
-    requestAnimationFrame(() => render());
+    queuePatch(p, e.target);
   }
 
   function onProjectEditor(e) {
     const p = state.projects.find((x) => x.id === state.selectedId);
     if (!p || !applyProjectField(p, e.target)) return;
-    requestAnimationFrame(() => render());
+    afterProjectEdit(p, e.target);
   }
 
   els.projectEditor.addEventListener("input", onProjectEditor);
@@ -4652,7 +5011,13 @@
       }
       p.phasesActive[toggleKey] = e.target.checked;
       if (PHASE_KEYS.every((k) => p.phasesActive[k])) p.phasesActive = null;
-      requestAnimationFrame(() => render());
+      const label = e.target.closest("label");
+      if (label) {
+        label.classList.toggle("phase-off", !e.target.checked);
+        const select = label.querySelector("select");
+        if (select) select.disabled = !e.target.checked;
+      }
+      queuePatch(p, e.target);
       return;
     }
     const key = e.target.getAttribute("data-phase-q");
@@ -4660,7 +5025,7 @@
     ensurePhaseQuarters(p, state.quarter);
     p.phaseQuarters[key] = e.target.value;
     p.quarterFocus = "full"; // manual override
-    requestAnimationFrame(() => render());
+    queuePatch(p, e.target);
   });
 
   els.quickFocusForm.addEventListener("change", (e) => {
