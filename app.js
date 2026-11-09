@@ -4050,7 +4050,25 @@
     );
   }
 
+  function okrIsRocketlaneRow(row) {
+    const project = okrLinkedProject(row);
+    return !!(project && String(project.id || "").startsWith("rl-"));
+  }
+
+  function okrAchievementTyped(row) {
+    return (
+      row.achievementOverride !== null &&
+      row.achievementOverride !== undefined &&
+      row.achievementOverride !== ""
+    );
+  }
+
+  function okrInputNumber(value) {
+    return String(Math.round(n(value) * 10) / 10);
+  }
+
   function okrApplicablePhaseKeys(row) {
+    if (!okrIsRocketlaneRow(row)) return OKR_PHASE_KEYS.slice();
     const project = okrLinkedProject(row);
     if (!project || !project.phaseQuarters) return OKR_PHASE_KEYS.slice();
     const quarter = row.quarter;
@@ -4166,15 +4184,54 @@
 
   function okrPhaseCell(row, key) {
     const value = Math.max(0, Math.min(100, n(row.phases && row.phases[key])));
-    const applicable = okrApplicablePhaseKeys(row).includes(key);
-    const quarterNote = applicable ? "Counts in this quarter" : `Outside ${row.quarter}`;
+    const manualRow = !okrIsRocketlaneRow(row);
+    const applicable = manualRow || okrApplicablePhaseKeys(row).includes(key);
+    const quarterNote = manualRow
+      ? "Counts toward the actual percentage"
+      : applicable
+        ? "Counts in this quarter"
+        : `Outside ${row.quarter}`;
+    const sourceLabel = manualRow ? "Actual" : applicable ? "This quarter" : "Other quarter";
     return `<td class="okr-phase${applicable ? "" : " okr-phase-out"}" title="${escapeAttr(quarterNote)}">
       <div class="okr-progress-cell">
         <input type="number" min="0" max="100" step="1" value="${value}" data-okr-phase="${key}" aria-label="${escapeAttr(OKR_PHASE_LABELS[key])} percent" />
-        <span class="okr-row-source">${applicable ? "This quarter" : "Other quarter"}</span>
+        <span class="okr-row-source">${sourceLabel}</span>
         <div class="okr-progress-track"><span style="width:${value}%"></span></div>
       </div>
     </td>`;
+  }
+
+  function okrAchievementCell(row) {
+    const achievement = okrAchievement(row);
+    const phaseAchievement = okrPhaseAchievement(row);
+    const manualRow = !okrIsRocketlaneRow(row);
+    const typed = okrAchievementTyped(row);
+    const phasePlaceholder = phaseAchievement === null ? "—" : okrInputNumber(phaseAchievement);
+    const value = manualRow
+      ? achievement === null
+        ? ""
+        : okrInputNumber(achievement)
+      : typed
+        ? okrInputNumber(row.achievementOverride)
+        : "";
+    const applicableCount = okrApplicablePhaseKeys(row).length;
+    const source = manualRow
+      ? typed
+        ? "Typed actual"
+        : "Phase average"
+      : typed
+        ? "Manual"
+        : achievement === null
+          ? "No phases this quarter"
+          : `${applicableCount} phase${applicableCount === 1 ? "" : "s"} · ${fmt(achievement, 1)}%`;
+    const title = manualRow
+      ? typed
+        ? "Actual percentage for this key result. Clear the field to use the average of the phase percentages."
+        : "Type the actual percentage. It replaces the average of the phase percentages."
+      : phaseAchievement === null
+        ? `No linked delivery phases are assigned to ${row.quarter}. Enter an achievement manually if needed.`
+        : `Enter an achievement manually, or clear this field to use the ${fmt(phaseAchievement, 1)}% average of phases assigned to ${row.quarter}.`;
+    return `<td class="okr-number"><div class="okr-progress-cell"><input type="number" min="0" max="200" step="0.1" value="${escapeAttr(value)}" placeholder="${escapeAttr(phasePlaceholder)}" title="${escapeAttr(title)}" data-okr-field="achievementOverride" /><span class="okr-row-source">${escapeHtml(source)}</span><div class="okr-progress-track"><span style="width:${achievement === null ? 0 : Math.min(100, achievement)}%"></span></div></div></td>`;
   }
 
   function renderOkr() {
@@ -4267,28 +4324,15 @@
     els.okrTable.innerHTML = `<table class="okr-table">${header}<tbody>${rows
       .map((row) => {
         const achievement = okrAchievement(row);
-        const phaseAchievement = okrPhaseAchievement(row);
-        const manualAchievement =
-          row.achievementOverride !== null &&
-          row.achievementOverride !== undefined &&
-          row.achievementOverride !== "";
         const result = okrWeightedResult(row);
         const confidence = okrConfidenceFor(row);
-        const applicablePhases = okrApplicablePhaseKeys(row);
-        const automaticAchievementLabel = achievement === null
-          ? "No phases this quarter"
-          : `${applicablePhases.length} phase${applicablePhases.length === 1 ? "" : "s"} · ${fmt(achievement, 1)}%`;
-        const phasePlaceholder = phaseAchievement === null ? "—" : fmt(phaseAchievement, 0);
-        const phaseTitle = phaseAchievement === null
-          ? `No linked delivery phases are assigned to ${row.quarter}. Enter an achievement manually if needed.`
-          : `Enter an achievement manually, or clear this field to use the ${fmt(phaseAchievement, 1)}% average of phases assigned to ${row.quarter}.`;
         const source = row.rocketlaneProjectId
           ? `${row.syncSource || "Rocketlane"}${row.syncedAt ? ` · ${new Date(row.syncedAt).toLocaleString()}` : ""}`
           : "Manual";
         return `<tr data-okr-id="${escapeAttr(row.id)}">
           <td class="okr-objective"><input type="text" list="okr-objectives" value="${escapeAttr(row.objective)}" data-okr-field="objective" /></td>
           <td class="okr-key-result"><textarea data-okr-field="keyResult">${escapeHtml(row.keyResult)}</textarea></td>
-          <td class="okr-number"><div class="okr-progress-cell"><input type="number" min="0" max="200" step="1" value="${manualAchievement ? n(row.achievementOverride) : ""}" placeholder="${phasePlaceholder}" title="${escapeAttr(phaseTitle)}" data-okr-field="achievementOverride" /><span class="okr-row-source">${manualAchievement ? "Manual" : automaticAchievementLabel}</span><div class="okr-progress-track"><span style="width:${achievement === null ? 0 : Math.min(100, achievement)}%"></span></div></div></td>
+          ${okrAchievementCell(row)}
           ${okrWeightCell(row)}
           <td class="okr-number" title="min(Achievement ÷ Goal, 1) × Weight"><strong>${achievement === null ? "—" : fmt(result, 1) + "%"}</strong></td>
           <td class="okr-details"><textarea data-okr-field="details">${escapeHtml(row.details)}</textarea></td>
@@ -5177,9 +5221,11 @@
     const phaseKey = event.target.getAttribute("data-okr-phase");
     const field = event.target.getAttribute("data-okr-field");
     if (phaseKey && OKR_PHASE_KEYS.includes(phaseKey)) {
+      if (!row.phases) row.phases = blankOkrPhases();
+      if (!row.phaseOverrides) row.phaseOverrides = {};
       row.phases[phaseKey] = Math.max(0, Math.min(100, n(event.target.value)));
       row.phaseOverrides[phaseKey] = true;
-      row.syncSource = row.rocketlaneProjectId ? "Rocketlane + manual override" : "Manual";
+      row.syncSource = okrIsRocketlaneRow(row) ? "Rocketlane + manual override" : "Manual";
     } else if (field) {
       if (field === "achievementOverride") {
         row.achievementOverride =
