@@ -2904,6 +2904,9 @@
   }
 
   let publishedRocketlaneSyncChanged = false;
+  // Compliance evidence from the published snapshot is copied only into empty browser fields,
+  // and only for the projects listed here (Team 01 Netsuite test).
+  const EVIDENCE_MERGE_IDS = ["rl-1519929"];
 
   function addPublishedRocketlaneProjects(data) {
     const sync = window.ROCKETLANE_SYNC;
@@ -2930,7 +2933,7 @@
         changed = true;
       }
       const incomingControls = project.compliance && project.compliance.controls;
-      if (incomingControls && typeof incomingControls === "object") {
+      if (EVIDENCE_MERGE_IDS.indexOf(project.id) !== -1 && incomingControls && typeof incomingControls === "object") {
         const compliance = ensureCompliance(existing);
         Object.keys(incomingControls).forEach((id) => {
           const evidence = incomingControls[id] && incomingControls[id].evidence;
