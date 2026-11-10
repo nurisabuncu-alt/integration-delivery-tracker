@@ -2906,7 +2906,7 @@
   let publishedRocketlaneSyncChanged = false;
   // Compliance evidence from the published snapshot is copied only into empty browser fields,
   // and only for the projects listed here (Team 01 Netsuite test).
-  const EVIDENCE_MERGE_IDS = ["rl-1519929"];
+  const EVIDENCE_MERGE_IDS = ["rl-1519929", "rl-1519929~Onur"];
 
   function addPublishedRocketlaneProjects(data) {
     const sync = window.ROCKETLANE_SYNC;
