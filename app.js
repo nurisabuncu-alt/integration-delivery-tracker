@@ -3613,7 +3613,7 @@
               evidenceUrl
                 ? `<a class="evidence-link" href="${escapeAttr(
                     evidenceUrl
-                  )}" target="_blank" rel="noopener">Open evidence</a>`
+                  )}" target="_blank" rel="noopener">Open proof</a>`
                 : ""
             }
           </div>
@@ -4334,7 +4334,7 @@
       <th class="okr-notes">Feedback</th>
       <th class="okr-notes">Manager Review</th>
       <th class="okr-link">Project</th>
-      <th class="okr-notes">Evidence</th>
+      <th class="okr-notes">Proof</th>
       <th class="okr-actions-cell">Remove</th>
     </tr></thead>`;
 
