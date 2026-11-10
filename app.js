@@ -2929,6 +2929,20 @@
         existing.flowCountFromTasks = true;
         changed = true;
       }
+      const incomingControls = project.compliance && project.compliance.controls;
+      if (incomingControls && typeof incomingControls === "object") {
+        const compliance = ensureCompliance(existing);
+        Object.keys(incomingControls).forEach((id) => {
+          const evidence = incomingControls[id] && incomingControls[id].evidence;
+          if (!evidence || (compliance.controls[id] && compliance.controls[id].evidence)) return;
+          compliance.controls[id].evidence = evidence;
+          changed = true;
+        });
+        if (project.compliance.inScope === true && compliance.inScope === false) {
+          compliance.inScope = true;
+          changed = true;
+        }
+      }
     });
     return changed;
   }
