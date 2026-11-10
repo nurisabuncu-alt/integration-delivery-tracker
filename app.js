@@ -3599,7 +3599,7 @@
                 record.completedDate
               )}" />
             </label>
-            <label>Evidence URL
+            <label>Proof URL
               <input type="text" data-compliance-control="${definition.id}" data-compliance-field="evidence" value="${escapeAttr(
                 record.evidence
               )}" placeholder="https://…" />
