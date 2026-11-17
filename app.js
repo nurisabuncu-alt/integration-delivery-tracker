@@ -1504,15 +1504,9 @@
     return weekdaysInQuarter(qStr) * 6;
   }
 
-  function parseIsoDate(value) {
-    const m = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
-    return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null;
-  }
-
-  // Hours still open from today to quarter end: remaining working-day capacity minus
-  // planned hours in phases that are not yet past their due date. A phase with no due
-  // date counts as planned. Past-due phases are treated as already delivered.
-  function unfulfilledFromToday(rows, qStr) {
+  // Working hours left from today through the end of the quarter. Weekends and
+  // Turkish public holidays are excluded. Planned project hours are not subtracted.
+  function unfulfilledFromToday(qStr) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const { q, year } = parseQuarter(qStr);
@@ -1520,23 +1514,8 @@
     const quarterStart = new Date(year, startMonth, 1);
     const quarterEnd = new Date(year, startMonth + 3, 1);
     const from = today > quarterStart ? today : quarterStart;
-    const remainingCapacity = from < quarterEnd ? workingDaysBetween(from, quarterEnd) * 6 : 0;
-    const planned = rows.reduce((sum, row) => {
-      const dues = row.p.phaseDueDates || {};
-      return (
-        sum +
-        PHASE_KEYS.reduce((inner, key) => {
-          const due = parseIsoDate(dues[key]);
-          if (due && due < today) return inner;
-          return inner + n(row.c.phaseHoursInQ[key]);
-        }, 0)
-      );
-    }, 0);
-    return {
-      remaining: remainingCapacity,
-      planned,
-      open: Math.max(0, remainingCapacity - planned),
-    };
+    const remaining = from < quarterEnd ? workingDaysBetween(from, quarterEnd) * 6 : 0;
+    return { remaining, open: remaining };
   }
 
   function allQuarterOptions(year) {
@@ -3774,7 +3753,7 @@
     const userRows = users.map((user) => {
       const userRowsNow = rowsForCurrent(user);
       const hours = userRowsNow.reduce((sum, row) => sum + row.c.quarterHours, 0);
-      const fromToday = selectedMonth() ? null : unfulfilledFromToday(userRowsNow, state.quarter);
+      const fromToday = selectedMonth() ? null : unfulfilledFromToday(state.quarter);
       return {
         user,
         hours,
