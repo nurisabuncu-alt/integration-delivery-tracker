@@ -3770,7 +3770,12 @@
       userRows.push({ user: "Unassigned", hours: unassignedHours, pct: 0, unassigned: true });
     }
 
+    const openHours = userRows.find((row) => row.open !== null && row.open !== undefined);
+    const legend = openHours
+      ? `<div class="capacity-legend"><span><i class="legend-allocated"></i>Allocated</span><span><i class="legend-open"></i>${fmt(openHours.open, 0)} h left from today</span></div>`
+      : "";
     els.capacityChart.innerHTML =
+      legend +
       userRows
         .map((row) => {
           const width = row.unassigned ? 0 : Math.min(row.pct * 100, 100);
@@ -3786,7 +3791,7 @@
                 ? "near"
                 : "available";
           return `<div class="capacity-row ${tone}">
-            <div class="capacity-label"><strong>${escapeHtml(row.user)}</strong><span>${fmt(row.hours, 1)} / ${row.unassigned ? "—" : fmt(personCapacity, 0)} h${row.open === null || row.open === undefined || row.unassigned ? "" : ` · ${fmt(row.open, 0)} h unfulfilled from today`}</span></div>
+            <div class="capacity-label"><strong>${escapeHtml(row.user)}</strong><span>${fmt(row.hours, 1)} h</span></div>
             <div class="capacity-bars">
               <div class="bar-track" role="img" aria-label="${escapeAttr(row.user)} planned ${(row.pct * 100).toFixed(1)} percent">
                 <span class="bar-fill" style="width:${width.toFixed(1)}%"></span>

@@ -205,6 +205,31 @@ input[type="number"] {
   align-items: center;
 }
 
+.capacity-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.25rem;
+  margin-bottom: 0.15rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.capacity-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.legend-allocated,
+.legend-open {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 2px;
+}
+
+.legend-allocated { background: var(--accent); }
+.legend-open { background: var(--warn); }
+
 .capacity-label {
   display: grid;
   gap: 0.15rem;
