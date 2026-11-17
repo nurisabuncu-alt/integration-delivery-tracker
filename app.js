@@ -1532,7 +1532,11 @@
         }, 0)
       );
     }, 0);
-    return Math.max(0, remainingCapacity - planned);
+    return {
+      remaining: remainingCapacity,
+      planned,
+      open: Math.max(0, remainingCapacity - planned),
+    };
   }
 
   function allQuarterOptions(year) {
@@ -3770,8 +3774,14 @@
     const userRows = users.map((user) => {
       const userRowsNow = rowsForCurrent(user);
       const hours = userRowsNow.reduce((sum, row) => sum + row.c.quarterHours, 0);
-      const open = selectedMonth() ? null : unfulfilledFromToday(userRowsNow, state.quarter);
-      return { user, hours, open, pct: personCapacity > 0 ? hours / personCapacity : 0 };
+      const fromToday = selectedMonth() ? null : unfulfilledFromToday(userRowsNow, state.quarter);
+      return {
+        user,
+        hours,
+        open: fromToday ? fromToday.open : null,
+        remaining: fromToday ? fromToday.remaining : 0,
+        pct: personCapacity > 0 ? hours / personCapacity : 0,
+      };
     });
     const unassignedHours = rowsForCurrent("Unassigned").reduce(
       (sum, row) => sum + row.c.quarterHours,
@@ -3803,6 +3813,27 @@
           </div>`;
         })
         .join("") || '<p class="empty-state">No capacity available for this filter.</p>';
+
+    const openRows = userRows.filter((row) => !row.unassigned && row.open !== null && row.open !== undefined);
+    if (openRows.length) {
+      const maxOpen = Math.max(...openRows.map((row) => row.remaining), 1);
+      els.capacityChart.insertAdjacentHTML(
+        "beforeend",
+        `<div class="unfulfilled-chart">
+          <p class="unfulfilled-caption">Unfulfilled hours from today to quarter end. Bar height is the open hours. The scale is the working time still left in the quarter.</p>
+          <div class="unfulfilled-columns">${openRows
+            .map((row) => {
+              const height = Math.max((row.open / maxOpen) * 100, row.open > 0 ? 3 : 0);
+              return `<div class="unfulfilled-column">
+                <div class="unfulfilled-bar-area"><span class="unfulfilled-bar" style="height:${height.toFixed(1)}%"></span></div>
+                <strong>${escapeHtml(row.user)}</strong>
+                <span>${fmt(row.open, 0)} h</span>
+              </div>`;
+            })
+            .join("")}</div>
+        </div>`
+      );
+    }
 
     const quarterData = quartersForYear(state.year).map((quarter) => {
       let hours = 0;
