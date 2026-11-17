@@ -3795,6 +3795,9 @@
       userRows
         .map((row) => {
           const width = row.unassigned ? 0 : Math.min(row.pct * 100, 100);
+          const openWidth = row.unassigned || row.open === null || row.open === undefined || personCapacity <= 0
+            ? 0
+            : Math.min((row.open / personCapacity) * 100, 100);
           const overflow = row.pct > 1 ? row.pct - 1 : 0;
           const tone = row.unassigned
             ? "unassigned"
@@ -3805,35 +3808,15 @@
                 : "available";
           return `<div class="capacity-row ${tone}">
             <div class="capacity-label"><strong>${escapeHtml(row.user)}</strong><span>${fmt(row.hours, 1)} / ${row.unassigned ? "—" : fmt(personCapacity, 0)} h${row.open === null || row.open === undefined || row.unassigned ? "" : ` · ${fmt(row.open, 0)} h unfulfilled from today`}</span></div>
-            <div class="bar-track" role="img" aria-label="${escapeAttr(row.user)} capacity ${(row.pct * 100).toFixed(1)}%">
+            <div class="bar-track" role="img" aria-label="${escapeAttr(row.user)} planned ${(row.pct * 100).toFixed(1)} percent${openWidth ? `, ${fmt(row.open, 0)} hours unfulfilled from today` : ""}">
               <span class="bar-fill" style="width:${width.toFixed(1)}%"></span>
+              ${openWidth ? `<span class="bar-unfulfilled" style="width:${openWidth.toFixed(1)}%"></span>` : ""}
               ${overflow > 0 ? `<span class="bar-overflow">+${fmt(overflow * personCapacity, 1)} h</span>` : ""}
             </div>
             <strong class="capacity-pct">${row.unassigned ? "Assign" : `${(row.pct * 100).toFixed(1)}%`}</strong>
           </div>`;
         })
         .join("") || '<p class="empty-state">No capacity available for this filter.</p>';
-
-    const openRows = userRows.filter((row) => !row.unassigned && row.open !== null && row.open !== undefined);
-    if (openRows.length) {
-      const maxOpen = Math.max(...openRows.map((row) => row.remaining), 1);
-      els.capacityChart.insertAdjacentHTML(
-        "beforeend",
-        `<div class="unfulfilled-chart">
-          <p class="unfulfilled-caption">Unfulfilled hours from today to quarter end. Bar height is the open hours. The scale is the working time still left in the quarter.</p>
-          <div class="unfulfilled-columns">${openRows
-            .map((row) => {
-              const height = Math.max((row.open / maxOpen) * 100, row.open > 0 ? 3 : 0);
-              return `<div class="unfulfilled-column">
-                <div class="unfulfilled-bar-area"><span class="unfulfilled-bar" style="height:${height.toFixed(1)}%"></span></div>
-                <strong>${escapeHtml(row.user)}</strong>
-                <span>${fmt(row.open, 0)} h</span>
-              </div>`;
-            })
-            .join("")}</div>
-        </div>`
-      );
-    }
 
     const quarterData = quartersForYear(state.year).map((quarter) => {
       let hours = 0;

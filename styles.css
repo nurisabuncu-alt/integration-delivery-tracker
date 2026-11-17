@@ -245,6 +245,7 @@ input[type="number"] {
   right: 0.35rem;
   top: 50%;
   transform: translateY(-50%);
+  z-index: 1;
   color: #fff;
   font-family: var(--mono);
   font-size: 0.58rem;
@@ -257,50 +258,13 @@ input[type="number"] {
   font-size: 0.8rem;
 }
 
-.unfulfilled-chart {
-  margin-top: 1.1rem;
-  padding-top: 0.9rem;
-  border-top: 1px solid var(--line);
-}
-
-.unfulfilled-caption {
-  margin: 0 0 0.7rem;
-  color: var(--muted);
-  font-size: 0.75rem;
-}
-
-.unfulfilled-columns {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 0.6rem;
-  align-items: end;
-}
-
-.unfulfilled-column {
-  display: grid;
-  justify-items: center;
-  gap: 0.2rem;
-  color: var(--muted);
-  font-size: 0.75rem;
-}
-
-.unfulfilled-column strong {
-  color: var(--text);
-  font-weight: 600;
-}
-
-.unfulfilled-bar-area {
-  display: flex;
-  align-items: flex-end;
-  width: min(3.5rem, 80%);
-  height: 7rem;
-  border-bottom: 1px solid var(--line);
-}
-
-.unfulfilled-bar {
-  width: 100%;
-  border-radius: 6px 6px 0 0;
-  background: var(--accent);
+.bar-unfulfilled {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--warn);
 }
 
 .capacity-row.available .capacity-pct { color: var(--accent); }
