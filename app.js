@@ -1504,6 +1504,37 @@
     return weekdaysInQuarter(qStr) * 6;
   }
 
+  function parseIsoDate(value) {
+    const m = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null;
+  }
+
+  // Hours still open from today to quarter end: remaining working-day capacity minus
+  // planned hours in phases that are not yet past their due date. A phase with no due
+  // date counts as planned. Past-due phases are treated as already delivered.
+  function unfulfilledFromToday(rows, qStr) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const { q, year } = parseQuarter(qStr);
+    const startMonth = (q - 1) * 3;
+    const quarterStart = new Date(year, startMonth, 1);
+    const quarterEnd = new Date(year, startMonth + 3, 1);
+    const from = today > quarterStart ? today : quarterStart;
+    const remainingCapacity = from < quarterEnd ? workingDaysBetween(from, quarterEnd) * 6 : 0;
+    const planned = rows.reduce((sum, row) => {
+      const dues = row.p.phaseDueDates || {};
+      return (
+        sum +
+        PHASE_KEYS.reduce((inner, key) => {
+          const due = parseIsoDate(dues[key]);
+          if (due && due < today) return inner;
+          return inner + n(row.c.phaseHoursInQ[key]);
+        }, 0)
+      );
+    }, 0);
+    return Math.max(0, remainingCapacity - planned);
+  }
+
   function allQuarterOptions(year) {
     // Allow assigning phases to adjacent years too
     const y = n(year) || 2026;
@@ -3737,8 +3768,10 @@
     els.capacityQuarterLabel.textContent = periodName();
 
     const userRows = users.map((user) => {
-      const hours = rowsForCurrent(user).reduce((sum, row) => sum + row.c.quarterHours, 0);
-      return { user, hours, pct: personCapacity > 0 ? hours / personCapacity : 0 };
+      const userRowsNow = rowsForCurrent(user);
+      const hours = userRowsNow.reduce((sum, row) => sum + row.c.quarterHours, 0);
+      const open = selectedMonth() ? null : unfulfilledFromToday(userRowsNow, state.quarter);
+      return { user, hours, open, pct: personCapacity > 0 ? hours / personCapacity : 0 };
     });
     const unassignedHours = rowsForCurrent("Unassigned").reduce(
       (sum, row) => sum + row.c.quarterHours,
@@ -3761,7 +3794,7 @@
                 ? "near"
                 : "available";
           return `<div class="capacity-row ${tone}">
-            <div class="capacity-label"><strong>${escapeHtml(row.user)}</strong><span>${fmt(row.hours, 1)} / ${row.unassigned ? "—" : fmt(personCapacity, 0)} h</span></div>
+            <div class="capacity-label"><strong>${escapeHtml(row.user)}</strong><span>${fmt(row.hours, 1)} / ${row.unassigned ? "—" : fmt(personCapacity, 0)} h${row.open === null || row.open === undefined || row.unassigned ? "" : ` · ${fmt(row.open, 0)} h unfulfilled from today`}</span></div>
             <div class="bar-track" role="img" aria-label="${escapeAttr(row.user)} capacity ${(row.pct * 100).toFixed(1)}%">
               <span class="bar-fill" style="width:${width.toFixed(1)}%"></span>
               ${overflow > 0 ? `<span class="bar-overflow">+${fmt(overflow * personCapacity, 1)} h</span>` : ""}
