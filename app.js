@@ -3787,10 +3787,12 @@
                 : "available";
           return `<div class="capacity-row ${tone}">
             <div class="capacity-label"><strong>${escapeHtml(row.user)}</strong><span>${fmt(row.hours, 1)} / ${row.unassigned ? "—" : fmt(personCapacity, 0)} h${row.open === null || row.open === undefined || row.unassigned ? "" : ` · ${fmt(row.open, 0)} h unfulfilled from today`}</span></div>
-            <div class="bar-track" role="img" aria-label="${escapeAttr(row.user)} planned ${(row.pct * 100).toFixed(1)} percent${openWidth ? `, ${fmt(row.open, 0)} hours unfulfilled from today` : ""}">
-              <span class="bar-fill" style="width:${width.toFixed(1)}%"></span>
-              ${openWidth ? `<span class="bar-unfulfilled" style="width:${openWidth.toFixed(1)}%"></span>` : ""}
-              ${overflow > 0 ? `<span class="bar-overflow">+${fmt(overflow * personCapacity, 1)} h</span>` : ""}
+            <div class="capacity-bars">
+              <div class="bar-track" role="img" aria-label="${escapeAttr(row.user)} planned ${(row.pct * 100).toFixed(1)} percent">
+                <span class="bar-fill" style="width:${width.toFixed(1)}%"></span>
+                ${overflow > 0 ? `<span class="bar-overflow">+${fmt(overflow * personCapacity, 1)} h</span>` : ""}
+              </div>
+              ${openWidth ? `<div class="bar-track" role="img" aria-label="${escapeAttr(row.user)} ${fmt(row.open, 0)} hours unfulfilled from today"><span class="bar-unfulfilled" style="width:${openWidth.toFixed(1)}%"></span></div>` : ""}
             </div>
             <strong class="capacity-pct">${row.unassigned ? "Assign" : `${(row.pct * 100).toFixed(1)}%`}</strong>
           </div>`;

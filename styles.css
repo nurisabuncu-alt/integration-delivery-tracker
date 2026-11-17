@@ -258,10 +258,13 @@ input[type="number"] {
   font-size: 0.8rem;
 }
 
+.capacity-bars {
+  display: grid;
+  gap: 0.28rem;
+}
+
 .bar-unfulfilled {
-  position: absolute;
-  top: 0;
-  right: 0;
+  display: block;
   height: 100%;
   border-radius: inherit;
   background: var(--warn);
