@@ -206,9 +206,8 @@ input[type="number"] {
 }
 
 .capacity-label {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.5rem;
+  display: grid;
+  gap: 0.15rem;
   font-size: 0.8rem;
 }
 
@@ -216,7 +215,7 @@ input[type="number"] {
   color: var(--muted);
   font-family: var(--mono);
   font-size: 0.72rem;
-  white-space: nowrap;
+  line-height: 1.35;
 }
 
 .bar-track,
