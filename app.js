@@ -3256,7 +3256,6 @@
     capacityQuarterLabel: document.getElementById("capacityQuarterLabel"),
     capacityChart: document.getElementById("capacityChart"),
     quarterChart: document.getElementById("quarterChart"),
-    phaseChart: document.getElementById("phaseChart"),
     projectChart: document.getElementById("projectChart"),
     btnTabEstimator: document.getElementById("btnTabEstimator"),
     btnTabCompliance: document.getElementById("btnTabCompliance"),
@@ -3834,21 +3833,6 @@
         </div>`
       )
       .join("");
-
-    const phaseTotals = Object.fromEntries(PHASE_KEYS.map((key) => [key, 0]));
-    selectedRows.forEach(({ c }) => {
-      PHASE_KEYS.forEach((key) => {
-        phaseTotals[key] += c.phaseHoursInQ[key];
-      });
-    });
-    const maxPhase = Math.max(...Object.values(phaseTotals), 1);
-    els.phaseChart.innerHTML = PHASE_KEYS.map(
-      (key) => `<div class="phase-chart-row">
-        <span>${escapeHtml(PHASE_LABELS[key])}</span>
-        <div class="mini-track"><i style="width:${((phaseTotals[key] / maxPhase) * 100).toFixed(1)}%"></i></div>
-        <strong>${fmt(phaseTotals[key], 1)} h</strong>
-      </div>`
-    ).join("");
 
     const topProjects = [...selectedRows]
       .sort((a, b) => b.c.quarterHours - a.c.quarterHours)
