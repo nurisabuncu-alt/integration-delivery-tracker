@@ -4146,7 +4146,36 @@
       const projectId = String(project.id || "").replace(/^rl-/, "");
       if (projectId) byProject[projectId] = hours;
     });
-    return { quarter, byProject, capacity: capacityHoursForQuarter(quarter) };
+    // Each person's linked key results share 100% of that person's weight in proportion to allocated hours.
+    // Manual key results keep the weight typed in; that person's linked rows share what is left.
+    const linkedHoursByOwner = {};
+    const manualWeightByOwner = {};
+    ((state.okr && state.okr.rows) || [])
+      .filter((row) => row.quarter === quarter)
+      .forEach((row) => {
+        const owner = normalizeAssignee(row.owner);
+        if (okrLinkedProject(row)) {
+          linkedHoursByOwner[owner] =
+            (linkedHoursByOwner[owner] || 0) + (byProject[String(row.rocketlaneProjectId || "")] || 0);
+        } else {
+          manualWeightByOwner[owner] = (manualWeightByOwner[owner] || 0) + Math.max(0, n(row.weight));
+        }
+      });
+    return {
+      quarter,
+      byProject,
+      capacity: capacityHoursForQuarter(quarter),
+      linkedHoursByOwner,
+      manualWeightByOwner,
+    };
+  }
+
+  function okrOwnerPool(pools, owner) {
+    const key = normalizeAssignee(owner);
+    return {
+      linkedHours: pools.linkedHoursByOwner[key] || 0,
+      linkedBudget: Math.max(0, 100 - (pools.manualWeightByOwner[key] || 0)),
+    };
   }
 
   function okrPools(quarter) {
@@ -4154,20 +4183,21 @@
     return okrHourPools;
   }
 
-  /** Linked rows use allocated quarter hours ÷ one person's quarter capacity. Manual rows keep the typed weight. */
+  /** Linked rows: their share of that person's linked hours, times that person's 100%. Manual rows keep the typed weight. */
   function okrEffectiveWeight(row) {
     const project = okrLinkedProject(row);
     if (!project) return Math.max(0, n(row.weight));
     const pools = okrPools(row.quarter);
     const hours = pools.byProject[String(row.rocketlaneProjectId || "")] || 0;
-    if (hours <= 0 || pools.capacity <= 0) return 0;
-    return (hours / pools.capacity) * 100;
+    const owner = okrOwnerPool(pools, row.owner);
+    if (hours <= 0 || owner.linkedHours <= 0) return 0;
+    return (hours / owner.linkedHours) * owner.linkedBudget;
   }
 
   function okrWeightCell(row) {
     const project = okrLinkedProject(row);
     if (!project) {
-      return `<td class="okr-number"><input type="number" min="0" max="100" step="0.1" value="${n(row.weight)}" data-okr-field="weight" title="Manual weight. Linked projects use allocated quarter hours divided by quarter capacity." /></td>`;
+      return `<td class="okr-number"><input type="number" min="0" max="100" step="0.1" value="${n(row.weight)}" data-okr-field="weight" title="Manual weight. Linked projects share the rest of the 100% by allocated quarter hours." /></td>`;
     }
     const pools = okrPools(row.quarter);
     const hours = pools.byProject[String(row.rocketlaneProjectId || "")] || 0;
@@ -4175,7 +4205,8 @@
       return `<td class="okr-number" title="No allocated hours in ${escapeAttr(row.quarter)}"><div class="okr-progress-cell"><strong>—</strong><span class="okr-row-source">No hours this quarter</span></div></td>`;
     }
     const weight = okrEffectiveWeight(row);
-    return `<td class="okr-number" title="${escapeAttr(`${fmt(hours, 1)} allocated hours of ${fmt(pools.capacity, 0)} quarter hours`)}"><div class="okr-progress-cell"><strong>${fmt(weight, 1)}%</strong><span class="okr-row-source">Hours</span></div></td>`;
+    const owner = okrOwnerPool(pools, row.owner);
+    return `<td class="okr-number" title="${escapeAttr(`${fmt(hours, 1)} of ${fmt(owner.linkedHours, 1)} linked hours for ${normalizeAssignee(row.owner)} in ${row.quarter}`)}"><div class="okr-progress-cell"><strong>${fmt(weight, 1)}%</strong><span class="okr-row-source">Hours</span></div></td>`;
   }
 
   function okrWeightedResult(row) {
@@ -4283,11 +4314,29 @@
 
     els.okrPortfolioScore.textContent = `${fmt(normalizedScore, 1)}%`;
     els.okrKeyResults.textContent = String(rows.length);
-    els.okrTotalWeight.textContent = `${fmt(totalWeight, 1)}%`;
+    const ownerTotals = {};
+    rows.forEach((row) => {
+      const owner = normalizeAssignee(row.owner);
+      ownerTotals[owner] = (ownerTotals[owner] || 0) + okrEffectiveWeight(row);
+    });
+    const ownerKeys = Object.keys(ownerTotals).sort();
+    const offTarget = ownerKeys.filter((key) => Math.abs(ownerTotals[key] - 100) > 0.05);
     const singleOwner = (state.okr.userFilter || "__all__") !== "__all__";
-    els.okrTotalWeight.classList.toggle("okr-weight-warning", singleOwner && totalWeight > 100.05);
-    els.okrTotalWeight.title =
-      "Each linked key result is that project's allocated quarter hours divided by one person's quarter capacity (weekdays × 6 h, excluding Turkish public holidays). The total does not have to be 100%. Manual rows keep the weight you type.";
+    if (singleOwner) {
+      els.okrTotalWeight.textContent = `${fmt(totalWeight, 1)}%`;
+      els.okrTotalWeight.classList.toggle("okr-weight-warning", Math.abs(totalWeight - 100) > 0.05);
+    } else {
+      els.okrTotalWeight.textContent = !ownerKeys.length
+        ? "0%"
+        : offTarget.length
+          ? `${offTarget.length} off 100%`
+          : "100% each";
+      els.okrTotalWeight.classList.toggle("okr-weight-warning", offTarget.length > 0);
+    }
+    els.okrTotalWeight.title = ownerKeys.length
+      ? ownerKeys.map((key) => `${key}: ${fmt(ownerTotals[key], 1)}%`).join("\n") +
+        "\nEach person's linked key results share 100% of their weight by allocated hours. Manual rows keep the weight you type, and linked rows share the rest."
+      : "No key results for this quarter.";
     els.okrOnTrack.textContent = String(
       confidences.filter((value) => value === "On track" || value === "Complete").length
     );
