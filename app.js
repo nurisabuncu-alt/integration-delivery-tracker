@@ -6174,8 +6174,45 @@
       let added = 0;
       for (const project of projects) {
         const id = String(project.projectId || "");
-        if (!id || known.has(id)) continue;
+        if (!id) continue;
         if (project.archived === true || String(project.archived) === "True") continue;
+        if (known.has(id)) {
+          const knownLabel = String((project.status && project.status.label) || "").toLowerCase();
+          if (knownLabel === "completed" || knownLabel === "cancelled") continue;
+          status.textContent = "Checking people on " + (project.projectName || id) + "…";
+          const present = new Set(
+            state.projects
+              .filter(
+                (item) =>
+                  String(item.rocketlaneId || String(item.id || "").replace(/^rl-/, "").split("~")[0]) === id
+              )
+              .map((item) => item.assignee)
+          );
+          const knownTasks = await fetchRocketlaneTasksForOkr(apiKey, id);
+          const wanted = new Set();
+          const ownerPerson = rosterFromRocketlaneName(rocketlaneMemberName(project.owner));
+          if (ownerPerson) wanted.add(ownerPerson);
+          knownTasks.forEach((task) => {
+            rocketlaneTaskMembers(task).forEach((member) => {
+              const person = rosterFromRocketlaneName(rocketlaneMemberName(member));
+              if (person) wanted.add(person);
+            });
+          });
+          if ([...wanted].every((person) => present.has(person))) continue;
+          const knownDetail = (await fetchRocketlaneProject(apiKey, id)) || project;
+          const knownPhases = await fetchRocketlanePhaseRows(apiKey, id);
+          const knownAllocations = await rocketlanePageRows(
+            apiKey,
+            "/api/1.0/resource-allocations?startDate=2026-01-01&endDate=2026-12-31&pageSize=100&includeAllFields=true&projectId.eq=" +
+              encodeURIComponent(id)
+          );
+          portfolioRowsFromRocketlane(knownDetail, knownTasks, knownPhases, knownAllocations)
+            .filter((row) => !present.has(row.assignee))
+            .forEach((row) => {
+              if (addPingedRocketlaneProject(row, knownPhases, knownTasks)) added += 1;
+            });
+          continue;
+        }
         let detail = project;
         let template = rocketlaneTemplateName(project);
         if (!template) {
