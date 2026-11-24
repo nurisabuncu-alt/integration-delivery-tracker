@@ -7,9 +7,19 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=no-phase-mix" />
+  <link rel="stylesheet" href="styles.css?v=google-signin" />
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
-<body>
+<body class="auth-locked">
+  <div id="authGate" class="auth-gate">
+    <div class="auth-card">
+      <p class="brand">Data Ops &amp; Integrations</p>
+      <h1>Integration Delivery Tracker</h1>
+      <p class="auth-lede">Sign in with your @logiwa.com Google account to continue.</p>
+      <div id="authButton" class="auth-button"></div>
+      <p id="authMessage" class="auth-message" role="alert"></p>
+    </div>
+  </div>
   <div class="app">
     <header class="hero">
       <div class="hero-copy">
@@ -317,6 +327,6 @@
   <script src="okr-progress-2026.js?v=rl-refresh-oct26"></script>
   <script src="local-snapshot.js?v=20261124T035123"></script>
   <script src="rocketlane-sync.js?v=20261124T035123"></script>
-  <script src="app.js?v=rl-known-people"></script>
+  <script src="auth.js?v=google-signin" data-app="app.js?v=rl-known-people"></script>
 </body>
 </html>
