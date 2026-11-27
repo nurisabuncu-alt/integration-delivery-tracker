@@ -2864,7 +2864,8 @@
           hasWorkInQuarter: deliveryInQ > 0 || quarterSP > 0,
         },
         quarter,
-        month
+        month,
+        p
       ),
       p,
       quarter,
@@ -2897,12 +2898,80 @@
     };
   }
 
-  function applyMonthSlice(result, quarter, month) {
-    const share = monthShareOfQuarter(quarter, month);
-    if (share === 1) return result;
+  function isoToLocalDate(value) {
+    const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!match) return null;
+    return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  }
+
+  function addDaysTo(date, days) {
+    const copy = new Date(date);
+    copy.setDate(copy.getDate() + days);
+    return copy;
+  }
+
+  // Share of a phase's working days that fall in the month. The phase covers the
+  // days after `from` up to and including `to`.
+  function phaseDaysInMonthShare(from, to, year, month) {
+    const windowStart = addDaysTo(from, 1);
+    const windowEnd = addDaysTo(to, 1);
+    const total = workingDaysBetween(windowStart, windowEnd);
+    if (total <= 0) {
+      return to.getFullYear() === year && to.getMonth() + 1 === month ? 1 : 0;
+    }
+    const monthStart = new Date(year, month - 1, 1);
+    const monthEnd = new Date(year, month, 1);
+    const start = windowStart > monthStart ? windowStart : monthStart;
+    const end = windowEnd < monthEnd ? windowEnd : monthEnd;
+    const inMonth = start < end ? workingDaysBetween(start, end) : 0;
+    return inMonth / total;
+  }
+
+  // Each phase's hours are spread over the working days between the previous phase's
+  // due date and its own due date (Rocketlane plan dates). Phases without dates use
+  // the quarter's working-day share.
+  function phaseMonthShares(p, quarter, month, phaseHoursInQ) {
+    const fallback = monthShareOfQuarter(quarter, month);
+    const perPhase = {};
+    PHASE_KEYS.forEach((key) => {
+      perPhase[key] = fallback;
+    });
+    const dues = p && p.phaseDueDates;
+    if (!dues || !month) return { overall: fallback, perPhase };
+    const { q, year } = parseQuarter(quarter);
+    const quarterStart = new Date(year, (q - 1) * 3, 1);
+    const quarterEnd = new Date(year, (q - 1) * 3 + 3, 1);
+    const floor = addDaysTo(quarterStart, -1);
+    const lastDay = addDaysTo(quarterEnd, -1);
+    let previous = isoToLocalDate(p.planStart);
+    PHASE_KEYS.forEach((key) => {
+      const due = isoToLocalDate(dues[key]);
+      if (!due) return;
+      let from = previous && previous < due ? previous : floor;
+      if (from < floor) from = floor;
+      const to = due > lastDay ? lastDay : due;
+      if (n(phaseHoursInQ[key]) > 0) {
+        perPhase[key] = phaseDaysInMonthShare(from, to < from ? from : to, year, month);
+      }
+      previous = due;
+    });
+    const total = PHASE_KEYS.reduce((sum, key) => sum + n(phaseHoursInQ[key]), 0);
+    if (total <= 0) return { overall: fallback, perPhase };
+    const weighted = PHASE_KEYS.reduce(
+      (sum, key) => sum + n(phaseHoursInQ[key]) * perPhase[key],
+      0
+    );
+    return { overall: weighted / total, perPhase };
+  }
+
+  function applyMonthSlice(result, quarter, month, p) {
+    if (monthShareOfQuarter(quarter, month) === 1) return result;
+    const shares = phaseMonthShares(p, quarter, month, result.phaseHoursInQ);
+    const share = shares.overall;
+    if (share === 1 && PHASE_KEYS.every((key) => shares.perPhase[key] === 1)) return result;
     const phaseHoursInQ = {};
     PHASE_KEYS.forEach((key) => {
-      phaseHoursInQ[key] = result.phaseHoursInQ[key] * share;
+      phaseHoursInQ[key] = result.phaseHoursInQ[key] * shares.perPhase[key];
     });
     const quarterHours = result.quarterHours * share;
     const quarterSP = result.quarterSP * share;
