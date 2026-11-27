@@ -2991,6 +2991,38 @@
   // and only for the projects listed here (Team 01 Netsuite test).
   const EVIDENCE_MERGE_IDS = ["rl-1519929", "rl-1519929~Onur"];
 
+  // Timeline fields come from the published Rocketlane sync. Rows the user has edited
+  // by hand (phase toggles, phase quarters, quarter focus) keep their own values.
+  const PUBLISHED_PHASE_FIELDS = ["phaseQuarters", "phasesActive", "phaseDueDates", "planStart", "planDue"];
+  const PHASE_BACKUP_KEY = "integration-phase-refresh-backup";
+
+  function recordPhaseBackup(id, previous) {
+    try {
+      const raw = localStorage.getItem(PHASE_BACKUP_KEY);
+      const store = raw ? JSON.parse(raw) : {};
+      if (!store[id]) store[id] = { savedAt: new Date().toISOString(), fields: previous };
+      localStorage.setItem(PHASE_BACKUP_KEY, JSON.stringify(store));
+    } catch (error) {
+      /* Storage unavailable: the refresh still applies. */
+    }
+  }
+
+  function refreshPublishedPhases(existing, project) {
+    if (existing.phaseEdited) return false;
+    const previous = {};
+    let changed = false;
+    PUBLISHED_PHASE_FIELDS.forEach((key) => {
+      const current = existing[key] === undefined ? null : existing[key];
+      const next = project[key] === undefined ? null : project[key];
+      if (JSON.stringify(current) === JSON.stringify(next)) return;
+      previous[key] = current;
+      existing[key] = next === null ? undefined : JSON.parse(JSON.stringify(next));
+      changed = true;
+    });
+    if (changed) recordPhaseBackup(existing.id, previous);
+    return changed;
+  }
+
   function addPublishedRocketlaneProjects(data) {
     const sync = window.ROCKETLANE_SYNC;
     const incoming = sync && Array.isArray(sync.projects) ? sync.projects : [];
@@ -3008,6 +3040,7 @@
         changed = true;
         return;
       }
+      if (refreshPublishedPhases(existing, project)) changed = true;
       if (project.updateFlowCount && existing.flowCountFromTasks !== false && n(existing.std) !== n(project.std)) {
         existing.std = n(project.std);
         existing.cpx = 0;
@@ -5306,6 +5339,7 @@
     if (e.target.getAttribute("data-qhours") || e.target.getAttribute("data-mhours")) return;
     const p = state.projects.find((x) => x.id === state.selectedId);
     if (!p) return;
+    p.phaseEdited = true;
     const toggleKey = e.target.getAttribute("data-phase-on");
     if (toggleKey) {
       if (!p.phasesActive) {
@@ -5338,6 +5372,7 @@
     if (!kind) return;
     const p = state.projects.find((x) => x.id === state.selectedId);
     if (!p) return;
+    p.phaseEdited = true;
     if (kind === "quarterFocus") {
       const anchor =
         els.quickFocusForm.querySelector('[data-focus="anchorQ"]')?.value || state.quarter;
